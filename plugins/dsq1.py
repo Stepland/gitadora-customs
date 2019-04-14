@@ -210,11 +210,29 @@ def find_next_measure_event(chart, start_key=None):
         if start_key and timestamp_key <= start_key:
             continue
 
+        found_beat = False
+        found_measure = False
         for beat in chart['timestamp'][timestamp_key]:
-            if beat['name'] in ["measure"]:
+            if beat['name'] in ["measure"] and beat.get('merged_beat', False):
                 return timestamp_key
 
     return None
+
+
+def get_beats_per_measure(chart, start, end):
+    keys_sorted = sorted(chart['timestamp'].keys(), key=lambda x: int(x))
+    beats = 0
+
+    for idx, timestamp_key in enumerate(keys_sorted[1:]):
+        if timestamp_key < start or timestamp_key >= end:
+            continue
+
+        for beat in chart['timestamp'][timestamp_key]:
+            if beat['name'] in ["beat"]:
+                beats += 1
+
+    return beats + 1 if beats > 0 else 4 # Default to 4 beats per measure if no beats found
+
 
 
 def generate_bpm_events(chart):
@@ -229,7 +247,10 @@ def generate_bpm_events(chart):
         if not next_bpm_timestamp_key:
             break
 
-        cur_bpm = 300 / (((next_bpm_timestamp_key - last_bpm_timestamp_key) / 4) / 60)
+        beats_per_measure = get_beats_per_measure(chart, last_bpm_timestamp_key, next_bpm_timestamp_key)
+        cur_bpm = 300 / (((next_bpm_timestamp_key - last_bpm_timestamp_key) / beats_per_measure) / 60)
+
+        print(cur_bpm)
 
         if cur_bpm != last_bpm:
             chart['timestamp'][last_bpm_timestamp_key].append({
@@ -377,11 +398,17 @@ def remove_extra_beats(chart):
         if x['name'] == "measure":
             found_measures.append(x['timestamp'])
 
+    discarded_beats = []
     for x in sorted(chart['beat_data'], key=lambda x: int(x['timestamp'])):
         if x['name'] == "beat" and x['timestamp'] in found_measures:
+            discarded_beats.append(x['timestamp'])
             continue
 
         new_beat_data.append(x)
+
+    for idx, x in enumerate(new_beat_data):
+        if x['name'] == "measure" and x['timestamp'] in discarded_beats:
+            new_beat_data[idx]['merged_beat'] = True
 
     chart['beat_data'] = new_beat_data
 
@@ -398,29 +425,37 @@ def calculate_timesig(chart):
     beat_count = None
     last_beat = None
     last_measure = None
+    skipped = 1
 
     for x in found_beats:
         if x['name'] == "measure":
             if beat_count == None:
                 beat_count = 1
                 last_measure = x['timestamp']
-            else:
+
+            elif x.get('merged_beat', False):
                 if last_beat != beat_count:
                     last_beat = beat_count
 
                     chart['beat_data'].append({
                         "data": {
                             "numerator": beat_count,
-                            "denominator": 4,
+                            "denominator": skipped * 4,
                         },
                         "name": "barinfo",
                         "timestamp": last_measure
                     })
 
+                    print(chart['beat_data'][-1])
+
                 beat_count = 1
                 last_measure = x['timestamp']
+                skipped = 1
 
-        elif x['name'] == "beat":
+            else:
+                skipped += 1
+
+        elif x['name'] == "beat" and x['timestamp'] != last_measure:
             beat_count += 1
 
     return chart
@@ -454,7 +489,7 @@ def generate_json_from_dsq1(params):
         part = ["drum", "guitar", "bass", "open"][game_type]
         diff = ['nov', 'bsc', 'adv', 'ext', 'mst'][difficulty]
 
-        if 'input_split' in params and part in params['input_split'] and diff in params['input_split'][part] and params['input_split'][part][diff]:
+        if 'input_split' in params and part in params['input_split'] and diff in params['input_split'][part] and params['input_split'][part][diff] and os.path.exists(params['input_split'][part][diff]):
             data = open(params['input_split'][part][diff], "rb").read()
             return (data, game_type, difficulty, is_metadata)
 
@@ -495,6 +530,8 @@ def generate_json_from_dsq1(params):
             parsed_chart = generate_metadata(parsed_chart)
         else:
             parsed_chart = generate_notes_metadata(parsed_chart)
+
+        # parsed_chart = remove_extra_beats(parsed_chart)
 
         charts.append(parsed_chart)
         charts[-1]['header']['musicid'] = musicid

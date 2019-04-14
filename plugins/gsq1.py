@@ -424,7 +424,7 @@ def parse_event_block(mdata, game, difficulty, is_metadata=False):
     }
 
 
-def read_gsq2_data(data, game_type, difficulty, is_metadata):
+def read_gsq1_data(data, game_type, difficulty, is_metadata):
     output = {
         "beat_data": []
     }
@@ -478,7 +478,7 @@ def convert_to_timestamp_chart(chart):
 
 
 def parse_chart_intermediate(chart, game_type, difficulty, is_metadata):
-    chart_raw = read_gsq2_data(chart, game_type, difficulty, is_metadata)
+    chart_raw = read_gsq1_data(chart, game_type, difficulty, is_metadata)
 
     if not chart_raw:
         return None
@@ -496,7 +496,7 @@ def parse_chart_intermediate(chart, game_type, difficulty, is_metadata):
     return chart_raw
 
 
-def generate_json_from_gsq2(params):
+def generate_json_from_gsq1(params):
     combine_guitars = params['merge_guitars'] if 'merge_guitars' in params else False
     output_data = {}
 
@@ -504,7 +504,7 @@ def generate_json_from_gsq2(params):
         part = ["drum", "guitar", "bass", "open"][game_type]
         diff = ['nov', 'bsc', 'adv', 'ext', 'mst'][difficulty]
 
-        if 'input_split' in params and part in params['input_split'] and diff in params['input_split'][part] and params['input_split'][part][diff]:
+        if 'input_split' in params and part in params['input_split'] and diff in params['input_split'][part] and params['input_split'][part][diff] and os.path.exists(params['input_split'][part][diff]):
             data = open(params['input_split'][part][diff], "rb").read()
             return (data, game_type, difficulty, is_metadata)
 
@@ -587,7 +587,7 @@ class Gsq1Format:
 
     @staticmethod
     def to_json(params):
-        return generate_json_from_gsq2(params)
+        return generate_json_from_gsq1(params)
 
     @staticmethod
     def to_chart(params):

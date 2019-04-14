@@ -324,7 +324,7 @@ def generate_beats_by_timestamp(chart):
                 found_first = True
 
             if name == "beat":
-                current_beats += (1920 // current_timesig['denominator'])
+                current_beats += (1920 // current_timesig['denominator']) * current_timesig['numerator']
 
             if name in ["measure", "beat"]:
                 last_beat = current_measures + current_beats
@@ -377,7 +377,7 @@ def generate_beats_for_events(chart):
             next_timestamp = keys[keys.index(last_timestamp) + 1]
             if timestamp not in beats_by_timestamp:
                 diff = int(timestamp_key) - last_timestamp
-                tf = ((diff / 300) * (cur_bpm / 60)) * (1920 // beat['time_signature']['denominator'])
+                tf = ((diff / 300) * (cur_bpm / 60)) * ((1920 // beat['time_signature']['denominator']) * beat['time_signature']['numerator'])
 
                 beat['beat'] = beat['beat'] + int(tf)
 
@@ -1177,11 +1177,14 @@ def parse_event_block(mdata, game, difficulty, events={}):
     if mdata[0x04] == 0x01:
         bpm_mpm = struct.unpack("<I", mdata[0x34:0x38])[0]
         packet_data['bpm'] = 60000000 / bpm_mpm
+        # print(timestamp, packet_data)
     elif mdata[0x04] == 0x02:
         # Time signature is represented as numerator/(1<<denominator)
         packet_data['numerator'] = mdata[0x34]
         packet_data['denominator'] = 1 << mdata[0x35]
         packet_data['denominator_orig'] = mdata[0x35]
+
+        # print(timestamp, packet_data)
     elif mdata[0x04] == 0x07:
         packet_data['unk'] = struct.unpack("<I", mdata[0x14:0x18])[0]  # What is this?
     elif mdata[0x04] == 0x10:
