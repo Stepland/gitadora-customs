@@ -210,11 +210,28 @@ def find_next_measure_event(chart, start_key=None):
         if start_key and timestamp_key <= start_key:
             continue
 
+        found_beat = False
+        found_measure = False
         for beat in chart['timestamp'][timestamp_key]:
-            if beat['name'] in ["measure"]:
+            if beat['name'] in ["measure"] and beat.get('merged_beat', False):
                 return timestamp_key
 
     return None
+
+
+def get_beats_per_measure(chart, start, end):
+    keys_sorted = sorted(chart['timestamp'].keys(), key=lambda x: int(x))
+    beats = 0
+
+    for idx, timestamp_key in enumerate(keys_sorted[1:]):
+        if timestamp_key < start or timestamp_key >= end:
+            continue
+
+        for beat in chart['timestamp'][timestamp_key]:
+            if beat['name'] in ["beat"]:
+                beats += 1
+
+    return beats + 1 if beats > 0 else 4 # Default to 4 beats per measure if no beats found
 
 
 def generate_bpm_events(chart):
@@ -229,7 +246,10 @@ def generate_bpm_events(chart):
         if not next_bpm_timestamp_key:
             break
 
-        cur_bpm = 300 / (((next_bpm_timestamp_key - last_bpm_timestamp_key) / 4) / 60)
+        beats_per_measure = get_beats_per_measure(chart, last_bpm_timestamp_key, next_bpm_timestamp_key)
+        cur_bpm = 300 / (((next_bpm_timestamp_key - last_bpm_timestamp_key) / beats_per_measure) / 60)
+
+        print(cur_bpm)
 
         if cur_bpm != last_bpm:
             chart['timestamp'][last_bpm_timestamp_key].append({
@@ -251,14 +271,6 @@ def generate_metadata(chart):
     chart = generate_bpm_events(chart)
 
     keys_sorted = sorted(chart['timestamp'].keys(), key=lambda x: int(x))
-
-    chart['timestamp'][keys_sorted[0]].append({
-        "data": {
-            "numerator": 4,
-            "denominator": 4,
-        },
-        "name": "barinfo"
-    })
 
     chart['timestamp'][keys_sorted[0]].append({
         "name": "baron",
@@ -344,9 +356,9 @@ def read_dsq2_data(data, game_type, difficulty, is_metadata):
         "beat_division": beat_division,
     }
 
-    entry_count = struct.unpack("<H", data[0x08:0x0a])[0]
-    header_size = 0x10
+    header_size = 0
     entry_size = 0x08
+    entry_count = len(data) // entry_size
 
     for i in range(entry_count):
         mdata = data[header_size + (i * entry_size):header_size + (i * entry_size) + entry_size]
@@ -354,6 +366,12 @@ def read_dsq2_data(data, game_type, difficulty, is_metadata):
         parsed_data = parse_event_block(mdata, part, difficulty, is_metadata=is_metadata)
 
         if parsed_data:
+            if parsed_data['name'] == "measure":
+                import copy
+                pd = copy.deepcopy(parsed_data)
+                pd['name'] = "beat"
+                output['beat_data'].append(pd)
+
             output['beat_data'].append(parsed_data)
 
     return output
@@ -384,11 +402,17 @@ def remove_extra_beats(chart):
         if x['name'] == "measure":
             found_measures.append(x['timestamp'])
 
+    discarded_beats = []
     for x in sorted(chart['beat_data'], key=lambda x: int(x['timestamp'])):
         if x['name'] == "beat" and x['timestamp'] in found_measures:
+            discarded_beats.append(x['timestamp'])
             continue
 
         new_beat_data.append(x)
+
+    for idx, x in enumerate(new_beat_data):
+        if x['name'] == "measure" and x['timestamp'] in discarded_beats:
+            new_beat_data[idx]['merged_beat'] = True
 
     chart['beat_data'] = new_beat_data
 
@@ -405,29 +429,38 @@ def calculate_timesig(chart):
     beat_count = None
     last_beat = None
     last_measure = None
+    skipped = 1
 
     for x in found_beats:
+        print(x)
         if x['name'] == "measure":
             if beat_count == None:
                 beat_count = 1
                 last_measure = x['timestamp']
-            else:
+
+            elif x.get('merged_beat', False):
                 if last_beat != beat_count:
                     last_beat = beat_count
 
                     chart['beat_data'].append({
                         "data": {
                             "numerator": beat_count,
-                            "denominator": 4,
+                            "denominator": skipped * 4,
                         },
                         "name": "barinfo",
                         "timestamp": last_measure
                     })
 
+                    print(chart['beat_data'][-1])
+
                 beat_count = 1
                 last_measure = x['timestamp']
+                skipped = 1
 
-        elif x['name'] == "beat":
+            else:
+                skipped += 1
+
+        elif x['name'] == "beat" and x['timestamp'] != last_measure:
             beat_count += 1
 
     return chart
@@ -462,14 +495,8 @@ def generate_json_from_dsq2(params):
         part = ["drum", "guitar", "bass", "open"][game_type]
         diff = ['nov', 'bsc', 'adv', 'ext', 'mst'][difficulty]
 
-        if 'input_split' in params and part in params['input_split'] and diff in params['input_split'][part] and params['input_split'][part][diff]:
+        if 'input_split' in params and part in params['input_split'] and diff in params['input_split'][part] and params['input_split'][part][diff] and os.path.exists(params['input_split'][part][diff]):
             data = open(params['input_split'][part][diff], "rb").read()
-
-            magic = data[0:4]
-            if magic != bytearray("DSQ1", encoding="ascii"):
-                print("Not a valid DSQ1 file:", params['input_split'][part][diff])
-                return None
-
             return (data, game_type, difficulty, is_metadata)
 
         return None
@@ -484,12 +511,10 @@ def generate_json_from_dsq2(params):
     ]
     raw_charts = [x for x in raw_charts if x is not None]
 
-    musicid = -1
     if len(raw_charts) > 0:
         raw_charts.append((raw_charts[0][0], raw_charts[0][1], raw_charts[0][2], True))
-        musicid = struct.unpack("<H", raw_charts[0][0][0x04:0x06])[0]
 
-    musicid = params.get('musicid', None) or musicid
+    musicid = params.get('musicid', None) or 0
 
     output_data['musicid'] = musicid
     output_data['format'] = Dsq2Format.get_format_name()
@@ -547,15 +572,6 @@ class Dsq2Format:
 
     @staticmethod
     def is_format(filename):
-        header = open(filename, "rb").read(0x40)
-
-        try:
-            is_dsq = header[0x00:0x04].decode('ascii') == "DSQ1"
-            if is_dsq:
-                return True
-        except:
-            return False
-
         return False
 
 

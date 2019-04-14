@@ -259,131 +259,6 @@ def combine_metadata_with_chart(metadata, chart):
     return chart_combined
 
 
-def get_timesigs_by_timestamp(chart_combined):
-    time_signatures_by_timestamp = {
-        0: {
-            'numerator': 4,
-            'denominator': 4,
-            'timesig': 1,
-        }
-    }
-
-    for k in sorted(chart_combined['timestamp'].keys(), key=lambda x: int(x)):
-        for beat in chart_combined['timestamp'][k]:
-            if beat['name'] == "barinfo":
-                time_signatures_by_timestamp[k] = {
-                    'numerator': beat['data']['numerator'],
-                    'denominator': beat['data']['denominator'],
-                    'timesig': beat['data']['numerator'] / beat['data']['denominator']
-                }
-
-    return time_signatures_by_timestamp
-
-
-def generate_timesigs_for_events(chart):
-    time_signatures_by_timestamp = get_timesigs_by_timestamp(chart)
-
-    # Generate a time_signature field for everything based on timestamp
-    for k in sorted(chart['timestamp'].keys(), key=lambda x: int(x)):
-        idx = [x for x in sorted(time_signatures_by_timestamp.keys(),
-                                 key=lambda x: int(x)) if int(x) <= int(k)][-1]
-        time_signature = time_signatures_by_timestamp[idx]
-
-        for idx in range(len(chart['timestamp'][k])):
-            chart['timestamp'][k][idx]['time_signature'] = time_signature
-
-    return chart
-
-
-def generate_beats_by_timestamp(chart):
-    # Generate beats based on measures and line markers
-    current_timesig = {'numerator': 4, 'denominator': 4}
-    current_measures = 0
-    current_beats = 0
-    beats_by_timestamp = {}
-
-    found_first = False
-
-    hold_timesig = None
-    for timestamp_key in sorted(chart['timestamp'].keys(), key=lambda x: int(x)):
-        for beat in chart['timestamp'][timestamp_key]:
-            name = beat['name']
-            timestamp = int(timestamp_key)
-
-            if not found_first:
-                current_timesig = beat['time_signature']
-                hold_timesig = current_timesig
-            else:
-                hold_timesig = beat['time_signature']
-
-            if name == "measure":
-                if found_first:
-                    current_beats = 0
-                    current_measures += (1920 // current_timesig['denominator']) * current_timesig['numerator']
-
-                found_first = True
-
-            if name == "beat":
-                current_beats += (1920 // current_timesig['denominator']) * current_timesig['numerator']
-
-            if name in ["measure", "beat"]:
-                last_beat = current_measures + current_beats
-                beats_by_timestamp[timestamp] = last_beat
-
-        current_timesig = hold_timesig
-
-    return beats_by_timestamp
-
-
-def generate_beats_for_events(chart):
-    beats_by_timestamp = generate_beats_by_timestamp(chart)
-
-    # Set base beat for every event at timestamp
-    last_timestamp = 0
-    for timestamp_key in sorted(chart['timestamp'].keys(), key=lambda x: int(x)):
-        for beat in chart['timestamp'][timestamp_key]:
-            name = beat['name']
-            timestamp = int(timestamp_key)
-
-            if timestamp in beats_by_timestamp:
-                last_timestamp = timestamp
-                break
-
-        for beat in chart['timestamp'][timestamp_key]:
-            name = beat['name']
-            beat['beat'] = beats_by_timestamp[last_timestamp]
-
-    last_timestamp = 0
-    cur_bpm = 0
-    for timestamp_key in sorted(chart['timestamp'].keys(), key=lambda x: int(x)):
-        for beat in chart['timestamp'][timestamp_key]:
-            name = beat['name']
-            timestamp = int(timestamp_key)
-
-            if timestamp in beats_by_timestamp:
-                last_timestamp = timestamp
-                break
-
-        for beat in chart['timestamp'][timestamp_key]:
-            if beat['name'] == "bpm":
-                cur_bpm = beat['data']['bpm']
-                break
-
-        for beat in chart['timestamp'][timestamp_key]:
-            name = beat['name']
-            timestamp = int(timestamp_key)
-
-            keys = list(sorted(beats_by_timestamp.keys(), key=lambda x: int(x))) + [0]
-            next_timestamp = keys[keys.index(last_timestamp) + 1]
-            if timestamp not in beats_by_timestamp:
-                diff = int(timestamp_key) - last_timestamp
-                tf = ((diff / 300) * (cur_bpm / 60)) * ((1920 // beat['time_signature']['denominator']) * beat['time_signature']['numerator'])
-
-                beat['beat'] = beat['beat'] + int(tf)
-
-    return chart
-
-
 def generate_metadata_fields(metadata, chart):
     # Generate and add any important data that isn't guaranteed
     # to be there (namely, beat markers for SQ3)
@@ -402,8 +277,6 @@ def generate_metadata_fields(metadata, chart):
         metadata['header']['time_division'] = 300
 
     chart_combined = combine_metadata_with_chart(metadata, chart)
-    chart_combined = generate_timesigs_for_events(chart_combined)
-    chart_combined = generate_beats_for_events(chart_combined)
 
     return chart_combined
 
@@ -1076,7 +949,7 @@ def generate_sq3_chart_data_from_json(chart):
 
             mdata[0x00:0x04] = struct.pack("<I", int(timestamp_key))
             mdata[0x04] = EVENT_ID_REVERSE[beat['name']] & 0xff
-            mdata[0x10:0x14] = struct.pack("<I", beat['beat'])
+            mdata[0x10:0x14] = struct.pack("<I", beat.get('beat', 0))
 
             if beat['name'] == "bpm":
                 mdata[0x34:0x38] = struct.pack("<I", int(round(60000000 / beat['data']['bpm'])))
