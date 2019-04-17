@@ -265,136 +265,23 @@ def add_note_durations(chart, sound_metadata):
     return chart
 
 
-def get_start_timestamp(chart):
-    for timestamp_key in sorted(chart['timestamp'].keys(), key=lambda x: int(x)):
-        for beat in chart['timestamp'][timestamp_key]:
-            if beat['name'] in ["startpos"]:
-                return timestamp_key
-
-    return sorted(chart['timestamp'].keys(), key=lambda x: int(x))[0]
-
-
-def get_end_timestamp(chart):
-    for timestamp_key in sorted(chart['timestamp'].keys(), key=lambda x: int(x)):
-        for beat in chart['timestamp'][timestamp_key]:
-            if beat['name'] in ["endpos"]:
-                return timestamp_key
-
-    return sorted(chart['timestamp'].keys(), key=lambda x: int(x))[-1]
-
-
-def find_next_measure_event(chart, start_key=None):
-    keys_sorted = sorted(chart['timestamp'].keys(), key=lambda x: int(x))
-
-    for idx, timestamp_key in enumerate(keys_sorted[1:]):
-        if timestamp_key in [0xffff, 0xffffffff]:
-            break
-
-        if start_key and timestamp_key <= start_key:
-            continue
-
-        for beat in chart['timestamp'][timestamp_key]:
-            if beat['name'] in ["measure"]:
-                return timestamp_key
-
-    return None
-
-
-def generate_bpm_events(chart):
-    bpms = []
-
-    last_bpm_timestamp_key = 0
-    last_bpm = None
-
-    while True:
-        next_bpm_timestamp_key = find_next_measure_event(chart, last_bpm_timestamp_key)
-
-        if not next_bpm_timestamp_key:
-            break
-
-        cur_bpm = 300 / (((next_bpm_timestamp_key - last_bpm_timestamp_key) / 4) / 60)
-
-        if cur_bpm != last_bpm:
-            chart['timestamp'][last_bpm_timestamp_key].append({
-                "data": {
-                    "bpm": cur_bpm
-                },
-                "name": "bpm"
-            })
-
-            last_bpm = cur_bpm
-
-        last_bpm_timestamp_key = next_bpm_timestamp_key
-
-
-    return chart
-
-
-def generate_metadata(chart):
-    chart = generate_bpm_events(chart)
-
-    keys_sorted = sorted(chart['timestamp'].keys(), key=lambda x: int(x))
-
-    chart['timestamp'][keys_sorted[0]].append({
-        "data": {
-            "numerator": 4,
-            "denominator": 4,
-        },
-        "name": "barinfo"
-    })
-
-    chart['timestamp'][keys_sorted[0]].append({
-        "name": "baron",
-        "data": {}
-    })
-
-    chart['timestamp'][keys_sorted[0]].append({
-        "name": "startpos",
-        "data": {}
-    })
-
-    chart['timestamp'][keys_sorted[-1]].append({
-        "name": "endpos",
-        "data": {}
-    })
-
-    return chart
-
-
-def generate_notes_metadata(chart):
-    keys_sorted = sorted(chart['timestamp'].keys(), key=lambda x: int(x))
-
-    chart['timestamp'][keys_sorted[0]].append({
-        "name": "chipstart",
-        "data": {}
-    })
-
-    return chart
-
-
 ########################
 #   GSQ parsing code   #
 ########################
 def parse_event_block(mdata, game, difficulty, is_metadata=False):
     packet_data = {}
 
-    timestamp, param1, param2, cmd = struct.unpack("<IIHH", mdata[0:12])
+    timestamp, param1, param2, cmd = struct.unpack("<IIII", mdata[0:16])
     orig_cmd = cmd
-    param3 = cmd & 0xff0f
+    param3 = cmd & 0xffffff0f
     cmd &= 0x00f0
-
-    if is_metadata and cmd not in [0x10]:
-        return None
-
-    if not is_metadata and cmd in [0x10]:
-        return None
 
     game_type_id = {"drum": 0, "guitar": 1, "bass": 2, "open": 3}[game]
 
     event_name = EVENT_ID_MAP[cmd]
 
     if cmd in [0x00, 0x20, 0x40, 0x60]:
-        packet_data['sound_id'] = param2
+        packet_data['sound_id'] = param1
         packet_data['volume'] = 127
 
         if (cmd & 0x40) != 0:
@@ -440,9 +327,9 @@ def read_gsq2_data(data, game_type, difficulty, is_metadata):
         "beat_division": beat_division,
     }
 
-    entry_count = struct.unpack("<H", data[0x08:0x0a])[0]
-    header_size = 0x10
-    entry_size = 0x0c
+    header_size = 0
+    entry_size = 0x10
+    entry_count = len(data) // entry_size
 
     for i in range(entry_count):
         mdata = data[header_size + (i * entry_size):header_size + (i * entry_size) + entry_size]
@@ -455,38 +342,11 @@ def read_gsq2_data(data, game_type, difficulty, is_metadata):
     return output
 
 
-def convert_to_timestamp_chart(chart):
-    chart['timestamp'] = collections.OrderedDict()
-
-    for x in sorted(chart['beat_data'], key=lambda x: int(x['timestamp'])):
-        if x['timestamp'] not in chart['timestamp']:
-            chart['timestamp'][x['timestamp']] = []
-
-        beat = x['timestamp']
-        del x['timestamp']
-
-        chart['timestamp'][beat].append(x)
-
-    del chart['beat_data']
-
-    return chart
-
-
 def parse_chart_intermediate(chart, game_type, difficulty, is_metadata):
     chart_raw = read_gsq2_data(chart, game_type, difficulty, is_metadata)
 
     if not chart_raw:
         return None
-
-    chart_raw = convert_to_timestamp_chart(chart_raw)
-
-    start_timestamp = int(get_start_timestamp(chart_raw))
-    end_timestamp = int(get_end_timestamp(chart_raw))
-
-    # Handle events based on beat offset in ascending order
-    for timestamp_key in sorted(chart_raw['timestamp'].keys(), key=lambda x: int(x)):
-        if int(timestamp_key) < start_timestamp or int(timestamp_key) > end_timestamp:
-            del chart_raw['timestamp'][timestamp_key]
 
     return chart_raw
 
@@ -501,12 +361,6 @@ def generate_json_from_gsq2(params):
 
         if 'input_split' in params and part in params['input_split'] and diff in params['input_split'][part] and params['input_split'][part][diff]:
             data = open(params['input_split'][part][diff], "rb").read()
-
-            magic = data[0:4]
-            if magic != bytearray("GSQ1", encoding="ascii"):
-                print("Not a valid GSQ1 file:", params['input_split'][part][diff])
-                return None
-
             return (data, game_type, difficulty, is_metadata)
 
         return None
@@ -535,9 +389,6 @@ def generate_json_from_gsq2(params):
     ]
     raw_charts = [x for x in raw_charts if x is not None]
 
-    if len(raw_charts) > 0:
-        raw_charts.append((raw_charts[0][0], raw_charts[0][1], raw_charts[0][2], True))
-
     musicid = -1
     if len(raw_charts) > 0:
         musicid = struct.unpack("<H", raw_charts[0][0][0x04:0x06])[0]
@@ -559,11 +410,6 @@ def generate_json_from_gsq2(params):
         game_type = ["drum", "guitar", "bass", "open"][parsed_chart['header']['game_type']]
         if game_type in ["guitar", "bass", "open"]:
             parsed_chart = add_note_durations(parsed_chart, params.get('sound_metadata', []))
-
-        if is_metadata:
-            parsed_chart = generate_metadata(parsed_chart)
-        else:
-            parsed_chart = generate_notes_metadata(parsed_chart)
 
         charts.append(parsed_chart)
         charts[-1]['header']['musicid'] = musicid
@@ -600,15 +446,6 @@ class Gsq2Format:
 
     @staticmethod
     def is_format(filename):
-        header = open(filename, "rb").read(0x40)
-
-        try:
-            is_gsq = header[0x00:0x04].decode('ascii') == "GSQ1"
-            if is_gsq:
-                return True
-        except:
-            return False
-
         return False
 
 

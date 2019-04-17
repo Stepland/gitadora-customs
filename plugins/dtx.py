@@ -288,17 +288,10 @@ def generate_output_data(chart, division=192):
                 0x08: [0x00] * division, # BPM
                 0x50: [0x00] * division, # Show measure bar
                 0x51: [0x00] * division, # Show beat bar
-
-                drum_mapping['hihat']: [0x00] * division,
-                drum_mapping['snare']: [0x00] * division,
-                drum_mapping['bass']: [0x00] * division,
-                drum_mapping['hightom']: [0x00] * division,
-                drum_mapping['lowtom']: [0x00] * division,
-                drum_mapping['rightcymbal']: [0x00] * division,
-                drum_mapping['floortom']: [0x00] * division,
-                drum_mapping['leftcymbal']: [0x00] * division,
-                drum_mapping['leftpedal']: [0x00] * division,
             }
+
+            for k in reverse_dtx_mapping:
+                output_data[measure_idx][k] = [0x00] * division
 
         if event['timestamp'] in bpm_per_measure:
             output_data[measure_idx][0x08][beat_idx] = bpm_list.index(bpm_per_measure[event['timestamp']]) + 1
@@ -319,7 +312,7 @@ def generate_output_data(chart, division=192):
             if event['data']['note'] == "auto":
                 continue
 
-            output_data[measure_idx][drum_mapping[event['data']['note']]][beat_idx] = event['data']['sound_id']
+            output_data[measure_idx][dtx_mapping[event['data']['note']]][beat_idx] = event['data']['sound_id']
 
             if event['data']['sound_id'] not in used_sound_ids:
                 used_sound_ids.append(event['data']['sound_id'])

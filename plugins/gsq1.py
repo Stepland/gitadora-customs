@@ -262,113 +262,6 @@ def add_note_durations(chart, sound_metadata):
     return chart
 
 
-def get_start_timestamp(chart):
-    for timestamp_key in sorted(chart['timestamp'].keys(), key=lambda x: int(x)):
-        for beat in chart['timestamp'][timestamp_key]:
-            if beat['name'] in ["startpos"]:
-                return timestamp_key
-
-    return sorted(chart['timestamp'].keys(), key=lambda x: int(x))[0]
-
-
-def get_end_timestamp(chart):
-    for timestamp_key in sorted(chart['timestamp'].keys(), key=lambda x: int(x)):
-        for beat in chart['timestamp'][timestamp_key]:
-            if beat['name'] in ["endpos"]:
-                return timestamp_key
-
-    return sorted(chart['timestamp'].keys(), key=lambda x: int(x))[-1]
-
-
-def find_next_measure_event(chart, start_key=None):
-    keys_sorted = sorted(chart['timestamp'].keys(), key=lambda x: int(x))
-
-    for idx, timestamp_key in enumerate(keys_sorted[1:]):
-        if timestamp_key in [0xffff, 0xffffffff]:
-            break
-
-        if start_key and timestamp_key <= start_key:
-            continue
-
-        for beat in chart['timestamp'][timestamp_key]:
-            if beat['name'] in ["measure"]:
-                return timestamp_key
-
-    return None
-
-
-def generate_bpm_events(chart):
-    bpms = []
-
-    last_bpm_timestamp_key = 0
-    last_bpm = None
-
-    while True:
-        next_bpm_timestamp_key = find_next_measure_event(chart, last_bpm_timestamp_key)
-
-        if not next_bpm_timestamp_key:
-            break
-
-        cur_bpm = 300 / (((next_bpm_timestamp_key - last_bpm_timestamp_key) / 4) / 60)
-
-        if cur_bpm != last_bpm:
-            chart['timestamp'][last_bpm_timestamp_key].append({
-                "data": {
-                    "bpm": cur_bpm
-                },
-                "name": "bpm"
-            })
-
-            last_bpm = cur_bpm
-
-        last_bpm_timestamp_key = next_bpm_timestamp_key
-
-
-    return chart
-
-
-def generate_metadata(chart):
-    chart = generate_bpm_events(chart)
-
-    keys_sorted = sorted(chart['timestamp'].keys(), key=lambda x: int(x))
-
-    chart['timestamp'][keys_sorted[0]].append({
-        "data": {
-            "numerator": 4,
-            "denominator": 4,
-        },
-        "name": "barinfo"
-    })
-
-    chart['timestamp'][keys_sorted[0]].append({
-        "name": "baron",
-        "data": {}
-    })
-
-    chart['timestamp'][keys_sorted[0]].append({
-        "name": "startpos",
-        "data": {}
-    })
-
-    chart['timestamp'][keys_sorted[-1]].append({
-        "name": "endpos",
-        "data": {}
-    })
-
-    return chart
-
-
-def generate_notes_metadata(chart):
-    keys_sorted = sorted(chart['timestamp'].keys(), key=lambda x: int(x))
-
-    chart['timestamp'][keys_sorted[0]].append({
-        "name": "chipstart",
-        "data": {}
-    })
-
-    return chart
-
-
 ########################
 #   GSQ parsing code   #
 ########################
@@ -384,12 +277,6 @@ def parse_event_block(mdata, game, difficulty, is_metadata=False):
         timestamp = 0xffffffff
     else:
         timestamp *= 4
-
-    if is_metadata and cmd not in [0x10]:
-        return None
-
-    if not is_metadata and cmd in [0x10]:
-        return None
 
     game_type_id = {"drum": 0, "guitar": 1, "bass": 2, "open": 3}[game]
 
@@ -461,38 +348,11 @@ def read_gsq1_data(data, game_type, difficulty, is_metadata):
     return output
 
 
-def convert_to_timestamp_chart(chart):
-    chart['timestamp'] = collections.OrderedDict()
-
-    for x in sorted(chart['beat_data'], key=lambda x: int(x['timestamp'])):
-        if x['timestamp'] not in chart['timestamp']:
-            chart['timestamp'][x['timestamp']] = []
-
-        beat = x['timestamp']
-        del x['timestamp']
-
-        chart['timestamp'][beat].append(x)
-
-    del chart['beat_data']
-
-    return chart
-
-
 def parse_chart_intermediate(chart, game_type, difficulty, is_metadata):
     chart_raw = read_gsq1_data(chart, game_type, difficulty, is_metadata)
 
     if not chart_raw:
         return None
-
-    chart_raw = convert_to_timestamp_chart(chart_raw)
-
-    start_timestamp = int(get_start_timestamp(chart_raw))
-    end_timestamp = int(get_end_timestamp(chart_raw))
-
-    # Handle events based on beat offset in ascending order
-    for timestamp_key in sorted(chart_raw['timestamp'].keys(), key=lambda x: int(x)):
-        if int(timestamp_key) < start_timestamp or int(timestamp_key) > end_timestamp:
-            del chart_raw['timestamp'][timestamp_key]
 
     return chart_raw
 
@@ -535,9 +395,6 @@ def generate_json_from_gsq1(params):
     ]
     raw_charts = [x for x in raw_charts if x is not None]
 
-    if len(raw_charts) > 0:
-        raw_charts.append((raw_charts[0][0], raw_charts[0][1], raw_charts[0][2], True))
-
     musicid = params.get('musicid', None) or 0
 
     output_data['musicid'] = musicid
@@ -555,11 +412,6 @@ def generate_json_from_gsq1(params):
         game_type = ["drum", "guitar", "bass", "open"][parsed_chart['header']['game_type']]
         if game_type in ["guitar", "bass", "open"]:
             parsed_chart = add_note_durations(parsed_chart, params.get('sound_metadata', []))
-
-        if is_metadata:
-            parsed_chart = generate_metadata(parsed_chart)
-        else:
-            parsed_chart = generate_notes_metadata(parsed_chart)
 
         charts.append(parsed_chart)
         charts[-1]['header']['musicid'] = musicid
