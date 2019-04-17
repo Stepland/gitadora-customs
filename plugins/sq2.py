@@ -153,14 +153,7 @@ REVERSE_NOTE_MAPPING = {
 
 def combine_metadata_with_chart(metadata, chart):
     chart_combined = copy.deepcopy(chart)
-
-    for timestamp_key in sorted(metadata['timestamp'].keys(), key=lambda x: int(x)):
-        if timestamp_key not in chart_combined['timestamp']:
-            chart_combined['timestamp'][timestamp_key] = []
-
-        for d in metadata['timestamp'][timestamp_key]:
-            chart_combined['timestamp'][timestamp_key].append(d)
-
+    chart_combined['beat_data'] += metadata['beat_data']
     return chart_combined
 
 
@@ -327,9 +320,7 @@ def generate_metadata_fields(metadata, chart):
         metadata['header']['time_division'] = 300
 
     chart_combined = combine_metadata_with_chart(metadata, chart)
-    chart_combined = generate_timesigs_for_events(chart_combined)
     chart_combined = correct_auto_notes(chart_combined)
-    chart_combined = generate_beats_for_events(chart_combined)
 
     return chart_combined
 
@@ -1132,10 +1123,13 @@ def parse_event_block(mdata, game, difficulty, events={}, is_metadata=False):
         packet_data['auto_note'] = 1
         event_name = "note"
 
+    timestamp = struct.unpack("<I", mdata[0x00:0x04])[0]
+
     return {
         "id": mdata[0x04],
         "name": event_name,
-        'timestamp': struct.unpack("<I", mdata[0x00:0x04])[0],
+        'timestamp': timestamp,
+        'timestamp_ms': timestamp / 300,
         "data": packet_data
     }
 
@@ -1182,38 +1176,11 @@ def read_sq2_data(data, events):
     return output
 
 
-def convert_to_timestamp_chart(chart):
-    chart['timestamp'] = {}
-
-    for x in chart['beat_data']:
-        if x['timestamp'] not in chart['timestamp']:
-            chart['timestamp'][x['timestamp']] = []
-
-        beat = x['timestamp']
-        del x['timestamp']
-
-        chart['timestamp'][beat].append(x)
-
-    del chart['beat_data']
-
-    return chart
-
-
 def parse_chart_intermediate(chart, events):
     chart_raw = read_sq2_data(chart, events)
 
     if not chart_raw:
         return None
-
-    chart_raw = convert_to_timestamp_chart(chart_raw)
-
-    start_timestamp = int(get_start_timestamp(chart_raw))
-    end_timestamp = int(get_end_timestamp(chart_raw))
-
-    # Handle events based on beat offset in ascending order
-    for timestamp_key in sorted(chart_raw['timestamp'].keys(), key=lambda x: int(x)):
-        if int(timestamp_key) < start_timestamp or int(timestamp_key) > end_timestamp:
-            del chart_raw['timestamp'][timestamp_key]
 
     return chart_raw
 
@@ -1414,6 +1381,20 @@ def generate_json_from_sq2(params):
 
         charts.append(parsed_chart)
         charts[-1]['header']['musicid'] = musicid
+
+    metadata_chart = None
+    for chart in charts:
+        if chart['header']['is_metadata'] == 1:
+            metadata_chart = chart
+            break
+
+    for chart_idx, chart in enumerate(charts):
+        if chart['header']['is_metadata'] == 1:
+            continue
+
+        charts[chart_idx] = combine_metadata_with_chart(metadata_chart, chart)
+
+    charts.remove(metadata_chart)
 
     charts = add_song_info(charts, musicid, params['musicdb'])
     charts = filter_charts(charts, params)

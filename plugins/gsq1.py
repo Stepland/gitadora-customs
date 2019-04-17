@@ -420,6 +420,7 @@ def parse_event_block(mdata, game, difficulty, is_metadata=False):
     return {
         "name": event_name,
         'timestamp': timestamp,
+        'timestamp_ms': timestamp / 300,
         "data": packet_data
     }
 
