@@ -270,6 +270,37 @@ def generate_output_data(chart, division=192):
         return events
 
 
+    def simplify_measures(chart):
+        def can_divide_measure(measure, n):
+            div = len(output_data[measure_idx][event]) // n
+
+            for j in range(0, div):
+                for k in range(1, n):
+                    if output_data[measure_idx][event][(j * n) + k] != 0:
+                        return False
+
+            return True
+
+        for measure_idx in output_data:
+            for event in list(output_data[measure_idx].keys()):
+                # Remove empty measures
+                if len([x for x in output_data[measure_idx][event] if x != 0]) == 0:
+                    del output_data[measure_idx][event]
+                    continue
+
+                # Simplify all measures that are evenly divisible
+                div_size = 1
+                for i in range(1, len(output_data[measure_idx][event]) + 1):
+                    if len(output_data[measure_idx][event]) % i != 0:
+                        continue
+
+                    if can_divide_measure(output_data[measure_idx][event], i):
+                        div_size = i
+
+                output_data[measure_idx][event] = [output_data[measure_idx][event][x] for x in range(0, len(output_data[measure_idx][event]), div_size)]
+
+        return output_data
+
     events = get_events_from_chart(chart)
     measures = get_measures(events)
     bpm_per_measure = get_bpm_per_measure(measures)
@@ -293,6 +324,9 @@ def generate_output_data(chart, division=192):
             for k in reverse_dtx_mapping:
                 output_data[measure_idx][k] = [0x00] * division
 
+            for k in auto_play_ranges:
+                output_data[measure_idx][k] = [0x00] * division
+
         if event['timestamp'] in bpm_per_measure:
             output_data[measure_idx][0x08][beat_idx] = bpm_list.index(bpm_per_measure[event['timestamp']]) + 1
 
@@ -310,15 +344,20 @@ def generate_output_data(chart, division=192):
 
         elif event['name'] == "note":
             if event['data']['note'] == "auto":
-                continue
+                for note in auto_play_ranges:
+                    if output_data[measure_idx][note][beat_idx] == 0:
+                        break
 
-            output_data[measure_idx][dtx_mapping[event['data']['note']]][beat_idx] = event['data']['sound_id']
+                output_data[measure_idx][note][beat_idx] = event['data']['sound_id']
+
+            else:
+                output_data[measure_idx][dtx_mapping[event['data']['note']]][beat_idx] = event['data']['sound_id']
 
             if event['data']['sound_id'] not in used_sound_ids:
                 used_sound_ids.append(event['data']['sound_id'])
 
     return {
-        'data': output_data,
+        'data': simplify_measures(output_data),
         'sound_ids': used_sound_ids,
         'bpms': bpm_list,
     }
