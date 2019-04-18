@@ -1,23 +1,6 @@
-import collections
-import copy
 import json
 import os
-import shutil
 import struct
-import threading
-from lxml import etree
-from lxml.builder import E
-import uuid
-
-import helper
-import mdb
-import eamxml
-import audio
-import vas3tool
-import wavbintool
-import tmpfile
-
-import plugins.wav as wav
 
 USE_THREADS = True
 
@@ -61,136 +44,13 @@ REVERSE_NOTE_MAPPING = {
 }
 
 
-def add_song_info(charts, music_id, music_db):
-    song_info = None
-
-    if music_db and music_db.endswith(".csv") or not music_db:
-        song_info = mdb.get_song_info_from_csv(music_db if music_db else "gitadora_music.csv", music_id)
-
-    if song_info is None or music_db and music_db.endswith(".xml") or not music_db:
-        song_info = mdb.get_song_info_from_mdb(music_db if music_db else "mdb_xg.xml", music_id)
-
-    for chart_idx in range(len(charts)):
-        chart = charts[chart_idx]
-
-        if not song_info:
-            continue
-
-        game_type = ["drum", "guitar", "bass", "open"][chart['header']['game_type']]
-
-        if 'title' in song_info:
-            charts[chart_idx]['header']['title'] = song_info['title']
-
-        if 'artist' in song_info:
-            charts[chart_idx]['header']['artist'] = song_info['artist']
-
-        if 'classics_difficulty' in song_info:
-            diff_idx = (chart['header']['game_type'] * 4) + chart['header']['difficulty']
-
-            if diff_idx < len(song_info['classics_difficulty']):
-                difficulty = song_info['classics_difficulty'][diff_idx]
-            else:
-                difficulty = 0
-
-            charts[chart_idx]['header']['level'] = {
-                game_type: difficulty * 10
-            }
-
-        if 'bpm' in song_info:
-            charts[chart_idx]['header']['bpm'] = song_info['bpm']
-
-        if 'bpm2' in song_info:
-            charts[chart_idx]['header']['bpm2'] = song_info['bpm2']
-
-    return charts
-
-
-def filter_charts(charts, params):
-    filtered_charts = []
-
-    for chart in charts:
-        if chart['header']['is_metadata'] != 0:
-            continue
-
-        part = ["drum", "guitar", "bass", "open"][chart['header']['game_type']]
-        has_all = 'all' in params['parts']
-        has_part = part in params['parts']
-        if not has_all and not has_part:
-            filtered_charts.append(chart)
-            continue
-
-        diff = ['nov', 'bsc', 'adv', 'ext', 'mst'][chart['header']['difficulty']]
-        has_min = 'min' in params['difficulty']
-        has_max = 'max' in params['difficulty']
-        has_all = 'all' in params['difficulty']
-        has_diff = diff in params['difficulty']
-
-        if not has_min and not has_max and not has_all and not has_diff:
-            filtered_charts.append(chart)
-            continue
-
-    for chart in filtered_charts:
-        charts.remove(chart)
-
-    return charts
-
-
-def split_charts_by_parts(charts):
-    guitar_charts = []
-    bass_charts = []
-    open_charts = []
-
-    for chart in charts:
-        if chart['header']['is_metadata'] != 0:
-            continue
-
-        game_type = ["drum", "guitar", "bass", "open"][chart['header']['game_type']]
-        if game_type == "guitar":
-            guitar_charts.append(chart)
-        elif game_type == "bass":
-            bass_charts.append(chart)
-        elif game_type == "open":
-            open_charts.append(chart)
-
-    # Remove charts from chart list
-    for chart in guitar_charts:
-        charts.remove(chart)
-
-    for chart in bass_charts:
-        charts.remove(chart)
-
-    for chart in open_charts:
-        charts.remove(chart)
-
-    return charts, guitar_charts, bass_charts, open_charts
-
-
-def add_note_durations(chart, sound_metadata):
-    duration_lookup = {}
-
-    if not sound_metadata or 'entries' not in sound_metadata:
-        return chart
-
-    for entry in sound_metadata['entries']:
-        duration_lookup[entry['sound_id']] = entry.get('duration', 0)
-
-    for k in chart['timestamp']:
-        for i in range(0, len(chart['timestamp'][k])):
-            if chart['timestamp'][k][i]['name'] in ['note', 'auto']:
-                chart['timestamp'][k][i]['data']['note_length'] = int(round(duration_lookup.get(chart['timestamp'][k][i]['data']['sound_id'], 0) * 300))
-
-    return chart
-
-
 ########################
 #   DSQ parsing code   #
 ########################
-def parse_event_block(mdata, game, difficulty, is_metadata=False):
+def parse_event_block(mdata, game):
     packet_data = {}
 
     timestamp, cmd, param1, param2 = struct.unpack("<IBBH", mdata[0:8])
-
-    game_type_id = {"drum": 0, "guitar": 1, "bass": 2, "open": 3}[game]
 
     event_name = EVENT_ID_MAP[cmd]
 
@@ -239,15 +99,9 @@ def read_dsq2_data(data, game_type, difficulty, is_metadata):
     for i in range(entry_count):
         mdata = data[header_size + (i * entry_size):header_size + (i * entry_size) + entry_size]
         part = ["drum", "guitar", "bass", "open"][game_type]
-        parsed_data = parse_event_block(mdata, part, difficulty, is_metadata=is_metadata)
+        parsed_data = parse_event_block(mdata, part)
 
         if parsed_data:
-            if parsed_data['name'] == "measure":
-                import copy
-                pd = copy.deepcopy(parsed_data)
-                pd['name'] = "beat"
-                output['beat_data'].append(pd)
-
             output['beat_data'].append(parsed_data)
 
     return output
@@ -327,24 +181,8 @@ def generate_json_from_dsq2(params):
         if not parsed_chart:
             continue
 
-        game_type = ["drum", "guitar", "bass", "open"][parsed_chart['header']['game_type']]
-        if game_type in ["guitar", "bass", "open"]:
-            parsed_chart = add_note_durations(parsed_chart, params.get('sound_metadata', []))
-
         charts.append(parsed_chart)
         charts[-1]['header']['musicid'] = musicid
-
-    charts = add_song_info(charts, musicid, params['musicdb'])
-    charts = filter_charts(charts, params)
-    charts, guitar_charts, bass_charts, open_charts = split_charts_by_parts(charts)
-
-    if combine_guitars:
-        guitar_charts, bass_charts = combine_guitar_charts(guitar_charts, bass_charts)
-
-    # Merge all charts back together after filtering, merging guitars etc
-    charts += guitar_charts
-    charts += bass_charts
-    charts += open_charts
 
     output_data['charts'] = charts
 
@@ -362,7 +200,7 @@ class Dsq2Format:
 
     @staticmethod
     def to_chart(params):
-        super()
+        raise NotImplementedError()
 
     @staticmethod
     def is_format(filename):
