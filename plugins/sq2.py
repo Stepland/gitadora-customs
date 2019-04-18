@@ -125,75 +125,71 @@ REVERSE_NOTE_MAPPING = {
 }
 
 
-########################
-#   SQ2 parsing code   #
-########################
-def parse_event_block(mdata, game, is_metadata=False):
-    packet_data = {}
-
-    timestamp = struct.unpack("<I", mdata[0x00:0x04])[0]
-
-    event_name = EVENT_ID_MAP[mdata[0x05]]
-
-    if mdata[0x05] == 0x10:
-        bpm_bpm = struct.unpack("<I", mdata[0x08:0x0c])[0]
-        packet_data['bpm'] = 60000000 / bpm_bpm
-    elif mdata[0x05] == 0x20:
-        # Time signature is represented as numerator/(1<<denominator)
-        packet_data['numerator'] = mdata[0x0c]
-        packet_data['denominator'] = 1 << mdata[0x0d]
-    elif mdata[0x05] == 0x00:
-        packet_data['sound_id'] = struct.unpack("<H", mdata[0x08:0x0A])[0]
-        packet_data['sound_unk'] = struct.unpack("<H", mdata[0x0A:0x0C])[0]
-        packet_data['volume'] = mdata[0x0c]
-
-        if (mdata[0x04] & 0x10) == 0x10:
-            # Open note
-            packet_data['note'] = NOTE_MAPPING[game][mdata[0x04] & 0x10] # note
-        else:
-            packet_data['note'] = NOTE_MAPPING[game][mdata[0x04] & 0x0f] # note
-
-        is_wail = (mdata[0x04] & 0x20) == 0x20
-
-        packet_data['wail_misc'] = 1 if is_wail else 0
-        packet_data['guitar_special'] = 1 if is_wail else 0
-
-        # TODO: Update code to work with .EVT file data
-        # if beat in events:
-        #     for event in events[beat]:
-        #         is_gametype = event['game_type'] == game_type_id
-        #         is_eventtype = event['event_type'] == 0
-        #         is_note = packet_data['sound_id'] == event['note']
-        #         is_diff = (event['gamelevel'] & (1 << difficulty)) != 0
-
-        #         if is_gametype and is_eventtype and is_note and is_diff:
-        #             packet_data['bonus_note'] = True
-
-        if is_metadata:
-            event_name = "meta"
-
-    elif mdata[0x05] == 0x01:
-        # Auto note
-        packet_data['sound_id'] = struct.unpack("<H", mdata[0x08:0x0A])[0]
-        packet_data['sound_unk'] = struct.unpack("<H", mdata[0x0A:0x0C])[0]
-        packet_data['volume'] = mdata[0x0c]
-        packet_data['note'] = "auto"
-        packet_data['auto_volume'] = 1
-        packet_data['auto_note'] = 1
-        event_name = "note"
-
-    timestamp = struct.unpack("<I", mdata[0x00:0x04])[0]
-
-    return {
-        "id": mdata[0x04],
-        "name": event_name,
-        'timestamp': timestamp,
-        'timestamp_ms': timestamp / 300,
-        "data": packet_data
-    }
-
-
 def read_sq2_data(data, events, other_params):
+    def parse_event_block(mdata, game, is_metadata=False):
+        packet_data = {}
+
+        timestamp = struct.unpack("<I", mdata[0x00:0x04])[0]
+
+        event_name = EVENT_ID_MAP[mdata[0x05]]
+
+        if mdata[0x05] == 0x10:
+            bpm_bpm = struct.unpack("<I", mdata[0x08:0x0c])[0]
+            packet_data['bpm'] = 60000000 / bpm_bpm
+        elif mdata[0x05] == 0x20:
+            # Time signature is represented as numerator/(1<<denominator)
+            packet_data['numerator'] = mdata[0x0c]
+            packet_data['denominator'] = 1 << mdata[0x0d]
+        elif mdata[0x05] == 0x00:
+            packet_data['sound_id'] = struct.unpack("<H", mdata[0x08:0x0A])[0]
+            packet_data['sound_unk'] = struct.unpack("<H", mdata[0x0A:0x0C])[0]
+            packet_data['volume'] = mdata[0x0c]
+
+            if (mdata[0x04] & 0x10) == 0x10:
+                # Open note
+                packet_data['note'] = NOTE_MAPPING[game][mdata[0x04] & 0x10] # note
+            else:
+                packet_data['note'] = NOTE_MAPPING[game][mdata[0x04] & 0x0f] # note
+
+            is_wail = (mdata[0x04] & 0x20) == 0x20
+
+            packet_data['wail_misc'] = 1 if is_wail else 0
+            packet_data['guitar_special'] = 1 if is_wail else 0
+
+            # TODO: Update code to work with .EVT file data
+            # if beat in events:
+            #     for event in events[beat]:
+            #         is_gametype = event['game_type'] == game_type_id
+            #         is_eventtype = event['event_type'] == 0
+            #         is_note = packet_data['sound_id'] == event['note']
+            #         is_diff = (event['gamelevel'] & (1 << difficulty)) != 0
+
+            #         if is_gametype and is_eventtype and is_note and is_diff:
+            #             packet_data['bonus_note'] = True
+
+            if is_metadata:
+                event_name = "meta"
+
+        elif mdata[0x05] == 0x01:
+            # Auto note
+            packet_data['sound_id'] = struct.unpack("<H", mdata[0x08:0x0A])[0]
+            packet_data['sound_unk'] = struct.unpack("<H", mdata[0x0A:0x0C])[0]
+            packet_data['volume'] = mdata[0x0c]
+            packet_data['note'] = "auto"
+            packet_data['auto_volume'] = 1
+            packet_data['auto_note'] = 1
+            event_name = "note"
+
+        timestamp = struct.unpack("<I", mdata[0x00:0x04])[0]
+
+        return {
+            "id": mdata[0x04],
+            "name": event_name,
+            'timestamp': timestamp,
+            'timestamp_ms': timestamp / 300,
+            "data": packet_data
+        }
+
     output = {
         "beat_data": []
     }

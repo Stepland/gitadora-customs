@@ -3,42 +3,42 @@ import struct
 
 from plugins.gsq import EVENT_ID_MAP, NOTE_MAPPING, generate_json_from_data
 
-def parse_event_block(mdata, game):
-    packet_data = {}
-
-    timestamp, param1, param2, cmd = struct.unpack("<IIII", mdata[0:16])
-    param3 = cmd & 0xffffff0f
-    cmd &= 0x00f0
-
-    event_name = EVENT_ID_MAP[cmd]
-
-    if cmd in [0x00, 0x20, 0x40, 0x60]:
-        packet_data['sound_id'] = param1
-        packet_data['volume'] = 127
-
-        if (cmd & 0x40) != 0:
-            packet_data['note'] = NOTE_MAPPING[game][0x10] # open note
-            packet_data['auto_unk'] = param3
-        else:
-            packet_data['note'] = NOTE_MAPPING[game][param3 & 0x0f] # note
-
-        if packet_data['note'] == "auto":
-            packet_data['auto_volume'] = 1
-            packet_data['auto_note'] = 1
-
-        is_wail = (cmd & 0x20) != 0
-        packet_data['wail_misc'] = 1 if is_wail else 0
-        packet_data['guitar_special'] = 1 if is_wail else 0
-
-    return {
-        "name": event_name,
-        'timestamp': timestamp,
-        'timestamp_ms': timestamp / 300,
-        "data": packet_data
-    }
-
 
 def read_gsq2_data(data, events, other_params):
+    def parse_event_block(mdata, game):
+        packet_data = {}
+
+        timestamp, param1, param2, cmd = struct.unpack("<IIII", mdata[0:16])
+        param3 = cmd & 0xffffff0f
+        cmd &= 0x00f0
+
+        event_name = EVENT_ID_MAP[cmd]
+
+        if cmd in [0x00, 0x20, 0x40, 0x60]:
+            packet_data['sound_id'] = param1
+            packet_data['volume'] = 127
+
+            if (cmd & 0x40) != 0:
+                packet_data['note'] = NOTE_MAPPING[game][0x10] # open note
+                packet_data['auto_unk'] = param3
+            else:
+                packet_data['note'] = NOTE_MAPPING[game][param3 & 0x0f] # note
+
+            if packet_data['note'] == "auto":
+                packet_data['auto_volume'] = 1
+                packet_data['auto_note'] = 1
+
+            is_wail = (cmd & 0x20) != 0
+            packet_data['wail_misc'] = 1 if is_wail else 0
+            packet_data['guitar_special'] = 1 if is_wail else 0
+
+        return {
+            "name": event_name,
+            'timestamp': timestamp,
+            'timestamp_ms': timestamp / 300,
+            "data": packet_data
+        }
+
     output = {
         "beat_data": []
     }

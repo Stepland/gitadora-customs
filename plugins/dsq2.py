@@ -4,34 +4,31 @@ import struct
 from plugins.gsq import generate_json_from_data
 from plugins.dsq import EVENT_ID_MAP, NOTE_MAPPING
 
-########################
-#   DSQ parsing code   #
-########################
-def parse_event_block(mdata, game):
-    packet_data = {}
-
-    timestamp, cmd, param1, param2 = struct.unpack("<IBBH", mdata[0:8])
-
-    event_name = EVENT_ID_MAP[cmd]
-
-    if event_name == "note":
-        packet_data['sound_id'] = param2
-        packet_data['volume'] = param1
-        packet_data['note'] = NOTE_MAPPING[game][cmd]
-
-        if packet_data['note'] == "auto":
-            packet_data['auto_volume'] = 1
-            packet_data['auto_note'] = 1
-
-    return {
-        "name": event_name,
-        'timestamp': timestamp,
-        'timestamp_ms': timestamp / 300,
-        "data": packet_data
-    }
-
 
 def read_dsq2_data(data, events, other_params):
+    def parse_event_block(mdata, game):
+        packet_data = {}
+
+        timestamp, cmd, param1, param2 = struct.unpack("<IBBH", mdata[0:8])
+
+        event_name = EVENT_ID_MAP[cmd]
+
+        if event_name == "note":
+            packet_data['sound_id'] = param2
+            packet_data['volume'] = param1
+            packet_data['note'] = NOTE_MAPPING[game][cmd]
+
+            if packet_data['note'] == "auto":
+                packet_data['auto_volume'] = 1
+                packet_data['auto_note'] = 1
+
+        return {
+            "name": event_name,
+            'timestamp': timestamp,
+            'timestamp_ms': timestamp / 300,
+            "data": packet_data
+        }
+
     output = {
         "beat_data": []
     }

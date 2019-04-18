@@ -3,52 +3,52 @@ import struct
 
 from plugins.gsq import EVENT_ID_MAP, NOTE_MAPPING, generate_json_from_data
 
-def parse_event_block(mdata, game):
-    packet_data = {}
-
-    timestamp, param1, param2, cmd = struct.unpack("<HHHH", mdata[0:8])
-    param3 = cmd & 0xff0f
-    cmd &= 0x00f0
-
-    if timestamp == 0xffff:
-        return None
-
-    else:
-        timestamp *= 4
-
-    event_name = EVENT_ID_MAP[cmd]
-
-    if cmd in [0x00, 0x20, 0x40, 0x60]:
-        packet_data['sound_id'] = param1
-        packet_data['volume'] = 127
-
-        if (cmd & 0x40) != 0:
-            packet_data['note'] = NOTE_MAPPING[game][0x10] # open note
-            packet_data['auto_unk'] = param3
-        else:
-            packet_data['note'] = NOTE_MAPPING[game][param3 & 0x0f] # note
-
-        if packet_data['note'] == "auto":
-            packet_data['auto_volume'] = 1
-            packet_data['auto_note'] = 1
-
-        is_wail = (cmd & 0x20) != 0
-        packet_data['wail_misc'] = 1 if is_wail else 0
-        packet_data['guitar_special'] = 1 if is_wail else 0
-
-    elif cmd not in [0x10]:
-        print("Unknown command %04x %02x" % (timestamp, cmd))
-        exit(1)
-
-    return {
-        "name": event_name,
-        'timestamp': timestamp,
-        'timestamp_ms': timestamp / 300,
-        "data": packet_data
-    }
-
 
 def read_gsq1_data(data, events, other_params):
+    def parse_event_block(mdata, game):
+        packet_data = {}
+
+        timestamp, param1, param2, cmd = struct.unpack("<HHHH", mdata[0:8])
+        param3 = cmd & 0xff0f
+        cmd &= 0x00f0
+
+        if timestamp == 0xffff:
+            return None
+
+        else:
+            timestamp *= 4
+
+        event_name = EVENT_ID_MAP[cmd]
+
+        if cmd in [0x00, 0x20, 0x40, 0x60]:
+            packet_data['sound_id'] = param1
+            packet_data['volume'] = 127
+
+            if (cmd & 0x40) != 0:
+                packet_data['note'] = NOTE_MAPPING[game][0x10] # open note
+                packet_data['auto_unk'] = param3
+            else:
+                packet_data['note'] = NOTE_MAPPING[game][param3 & 0x0f] # note
+
+            if packet_data['note'] == "auto":
+                packet_data['auto_volume'] = 1
+                packet_data['auto_note'] = 1
+
+            is_wail = (cmd & 0x20) != 0
+            packet_data['wail_misc'] = 1 if is_wail else 0
+            packet_data['guitar_special'] = 1 if is_wail else 0
+
+        elif cmd not in [0x10]:
+            print("Unknown command %04x %02x" % (timestamp, cmd))
+            exit(1)
+
+        return {
+            "name": event_name,
+            'timestamp': timestamp,
+            'timestamp_ms': timestamp / 300,
+            "data": packet_data
+        }
+
     output = {
         "beat_data": []
     }

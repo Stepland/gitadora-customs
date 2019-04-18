@@ -216,76 +216,75 @@ REVERSE_NOTE_MAPPING = {
 }
 
 
-def parse_event_block(mdata, game, events={}):
-    packet_data = {}
-
-    timestamp = struct.unpack("<I", mdata[0x00:0x04])[0]
-    beat = struct.unpack("<I", mdata[0x10:0x14])[0]
-    game_type_id = {"drum": 0, "guitar": 1, "bass": 2}[game]
-
-    if mdata[0x04] == 0x01:
-        bpm_mpm = struct.unpack("<I", mdata[0x34:0x38])[0]
-        packet_data['bpm'] = 60000000 / bpm_mpm
-        # print(timestamp, packet_data)
-    elif mdata[0x04] == 0x02:
-        # Time signature is represented as numerator/(1<<denominator)
-        packet_data['numerator'] = mdata[0x34]
-        packet_data['denominator'] = 1 << mdata[0x35]
-        packet_data['denominator_orig'] = mdata[0x35]
-
-        # print(timestamp, packet_data)
-    elif mdata[0x04] == 0x07:
-        packet_data['unk'] = struct.unpack("<I", mdata[0x14:0x18])[0]  # What is this?
-    elif mdata[0x04] == 0x10:
-        packet_data['hold_duration'] = struct.unpack("<I", mdata[0x08:0x0c])[0]
-        packet_data['unk'] = struct.unpack("<I", mdata[0x14:0x18])[0]  # What is this?
-        packet_data['sound_id'] = struct.unpack("<I", mdata[0x20:0x24])[0]
-
-        # Note length (relation to hold duration)
-        packet_data['note_length'] = struct.unpack("<I", mdata[0x24:0x28])[0]
-
-        packet_data['volume'] = mdata[0x2d]
-        packet_data['auto_volume'] = mdata[0x2e]
-        packet_data['note'] = NOTE_MAPPING[game][mdata[0x30]]
-
-        # wail direction? 0/1 = up, 2 = down. Seems to alternate 0 and 1 if wailing in succession
-        packet_data['wail_misc'] = mdata[0x31]
-
-        # 2 = hold note, 1 = wail (bitmasks, so 3 = wail + hold)
-        packet_data['guitar_special'] = mdata[0x32]
-
-        # Auto note
-        packet_data['auto_note'] = mdata[0x34]
-
-        if packet_data['auto_note'] == 1:
-            packet_data['note'] = "auto"
-
-        if beat in events:
-            for event in events[beat]:
-                is_gametype = event['game_type'] == game_type_id
-                is_eventtype = event['event_type'] == 0
-                is_note = packet_data['sound_id'] == event['note']
-
-                # This field seems to be maybe left over from previous games?
-                # 1852 doesn't work properly set the gamelevel fields
-                #is_diff = (event['gamelevel'] & (1 << difficulty)) != 0
-
-                if is_gametype and is_eventtype and is_note:
-                    packet_data['bonus_note'] = True
-
-    timestamp = struct.unpack("<I", mdata[0x00:0x04])[0]
-
-    return {
-        "id": mdata[0x04],
-        "name": EVENT_ID_MAP[mdata[0x04]],
-        'timestamp': timestamp,
-        'timestamp_ms': timestamp / 300,
-        'beat': beat,
-        "data": packet_data
-    }
-
-
 def read_sq3_data(data, events, other_params):
+    def parse_event_block(mdata, game, events={}):
+        packet_data = {}
+
+        timestamp = struct.unpack("<I", mdata[0x00:0x04])[0]
+        beat = struct.unpack("<I", mdata[0x10:0x14])[0]
+        game_type_id = {"drum": 0, "guitar": 1, "bass": 2}[game]
+
+        if mdata[0x04] == 0x01:
+            bpm_mpm = struct.unpack("<I", mdata[0x34:0x38])[0]
+            packet_data['bpm'] = 60000000 / bpm_mpm
+            # print(timestamp, packet_data)
+        elif mdata[0x04] == 0x02:
+            # Time signature is represented as numerator/(1<<denominator)
+            packet_data['numerator'] = mdata[0x34]
+            packet_data['denominator'] = 1 << mdata[0x35]
+            packet_data['denominator_orig'] = mdata[0x35]
+
+            # print(timestamp, packet_data)
+        elif mdata[0x04] == 0x07:
+            packet_data['unk'] = struct.unpack("<I", mdata[0x14:0x18])[0]  # What is this?
+        elif mdata[0x04] == 0x10:
+            packet_data['hold_duration'] = struct.unpack("<I", mdata[0x08:0x0c])[0]
+            packet_data['unk'] = struct.unpack("<I", mdata[0x14:0x18])[0]  # What is this?
+            packet_data['sound_id'] = struct.unpack("<I", mdata[0x20:0x24])[0]
+
+            # Note length (relation to hold duration)
+            packet_data['note_length'] = struct.unpack("<I", mdata[0x24:0x28])[0]
+
+            packet_data['volume'] = mdata[0x2d]
+            packet_data['auto_volume'] = mdata[0x2e]
+            packet_data['note'] = NOTE_MAPPING[game][mdata[0x30]]
+
+            # wail direction? 0/1 = up, 2 = down. Seems to alternate 0 and 1 if wailing in succession
+            packet_data['wail_misc'] = mdata[0x31]
+
+            # 2 = hold note, 1 = wail (bitmasks, so 3 = wail + hold)
+            packet_data['guitar_special'] = mdata[0x32]
+
+            # Auto note
+            packet_data['auto_note'] = mdata[0x34]
+
+            if packet_data['auto_note'] == 1:
+                packet_data['note'] = "auto"
+
+            if beat in events:
+                for event in events[beat]:
+                    is_gametype = event['game_type'] == game_type_id
+                    is_eventtype = event['event_type'] == 0
+                    is_note = packet_data['sound_id'] == event['note']
+
+                    # This field seems to be maybe left over from previous games?
+                    # 1852 doesn't work properly set the gamelevel fields
+                    #is_diff = (event['gamelevel'] & (1 << difficulty)) != 0
+
+                    if is_gametype and is_eventtype and is_note:
+                        packet_data['bonus_note'] = True
+
+        timestamp = struct.unpack("<I", mdata[0x00:0x04])[0]
+
+        return {
+            "id": mdata[0x04],
+            "name": EVENT_ID_MAP[mdata[0x04]],
+            'timestamp': timestamp,
+            'timestamp_ms': timestamp / 300,
+            'beat': beat,
+            "data": packet_data
+        }
+
     output = {
         "beat_data": []
     }
