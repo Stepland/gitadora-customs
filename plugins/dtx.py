@@ -169,6 +169,10 @@ bass_range = list(range(0xa0, 0xa7 + 1)) + \
     list(range(0xda, 0xe8 + 1))
 
 
+def convert_base36(val, padding):
+    return base_repr(val, 36, padding=padding)[-padding:]
+
+
 def generate_output_data(chart, game_type, division=192):
     def get_last_bpm(bpms, offset):
         last_bpm = 0
@@ -416,12 +420,16 @@ def generate_output_data(chart, game_type, division=192):
 
     for event in events:
         longnote_fields = {
+            'd': None,
             'g': 0x2c,
             'b': 0x2d,
             'o': 0x2c,
             'g1': 0x2c,
             'g2': 0x2d,
         }[game_type]
+
+        if not longnote_fields:
+            break
 
         if event['name'] == "_note_start":
             measure_idx, beat_idx = get_nearest_beat(mapping, event['timestamp_ms'])
@@ -485,6 +493,7 @@ def create_dtx_from_json(params):
         difficulty = ['nov', 'bsc', 'adv', 'ext', 'mst'][chart['header']['difficulty']]
         game_initial = ['d', 'g', 'b', 'o', 'g1', 'g2'][chart['header']['game_type']]
         sound_initial = ['drum', 'guitar', 'guitar', 'guitar', 'guitar', 'guitar'][chart['header']['game_type']]
+        bgm_filename = ['_gbk.wav', 'd_bk.wav', 'dg_k.wav', 'd_bk.wav', 'd_bk.wav', 'd_bk.wav'][chart['header']['game_type']]
 
         output_data = generate_output_data(chart, game_initial)
 
@@ -505,12 +514,12 @@ def create_dtx_from_json(params):
             #BLEVEL: 0\n""")
 
             for k in output_data['sound_ids']:
-                outfile.write("#WAV%s: %s\n" % (base_repr(k, 36, padding=2)[-2:], os.path.join(sound_initial, "%04x.wav" % output_data['sound_ids'][k])))
+                outfile.write("#WAV%s: %s\n" % (convert_base36(k, 2), os.path.join(sound_initial, "%04x.wav" % output_data['sound_ids'][k])))
 
-            outfile.write("""#WAVZZ bgm.wav
+            outfile.write("""#WAVZZ: %s
             #00001: ZZ
             #000C2: 02
-            \n""")
+            \n""" % (os.path.join(sound_initial, bgm_filename)))
 
             outfile.write("#BPM %f\n" % output_data['bpms'][0])
             for i, bpm in enumerate(output_data['bpms']):
@@ -523,7 +532,7 @@ def create_dtx_from_json(params):
                         outfile.write("#%03d%02X: %f\n" % (measure_idx, eidx, output_data['data'][measure_idx][eidx]))
 
                     else:
-                        outfile.write("#%03d%02X: %s\n" % (measure_idx, eidx, "".join(["%02X" % x for x in output_data['data'][measure_idx][eidx]])))
+                        outfile.write("#%03d%02X: %s\n" % (measure_idx, eidx, "".join([convert_base36(x, 2) for x in output_data['data'][measure_idx][eidx]])))
 
 
 class DtxFormat:
