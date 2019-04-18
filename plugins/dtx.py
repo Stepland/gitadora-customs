@@ -245,7 +245,8 @@ def generate_output_data(chart, division=192):
                 mapping[cur_pos] = (measure_idx, i)
                 cur_pos = cur_pos + beat_duration
 
-        last_event_timestamp = sorted(events, key=lambda x:x['timestamp'])[-1]['timestamp_ms']
+        last_event = sorted(events, key=lambda x:x['timestamp'])[-1]
+        last_event_timestamp = last_event['timestamp_ms']
 
         while cur_pos < last_event_timestamp:
             measure_idx += 1
@@ -263,14 +264,13 @@ def generate_output_data(chart, division=192):
     def get_events_from_chart(chart):
         events = []
 
-        for event in sorted(chart['charts'][0]['beat_data'], key=lambda x:x['timestamp']):
+        for event in sorted(chart['beat_data'], key=lambda x:x['timestamp']):
             events.append(event)
 
         return events
 
 
     events = get_events_from_chart(chart)
-
     measures = get_measures(events)
     bpm_per_measure = get_bpm_per_measure(measures)
     bpm_list = get_bpm_list(bpm_per_measure)
@@ -324,41 +324,61 @@ def generate_output_data(chart, division=192):
     }
 
 
-
 def create_dtx_from_json(params):
     output_json = {}
 
-    output_data = generate_output_data(json.loads(params['input']))
+    input_json = json.loads(params['input'])
+    output_folder = params.get('output', "")
 
-    print("""#TITLE: (no title)
-    #ARTIST: (no artist)
-    #DLEVEL: 0
-    #GLEVEL: 0
-    #BLEVEL: 0""")
+    if 'format' in input_json:
+        origin_format = "_%s" % input_json['format'].lower()
+    else:
+        origin_format = ""
 
-    for sound_id in sorted(output_data['sound_ids']):
-        print("#WAV%02X: %04x.wav" % (sound_id, sound_id))
+    for chart in input_json['charts']:
+        output_data = generate_output_data(chart)
 
-    print("""#WAVZZ bgm.wav
-    #00001: ZZ
-    #000C2: 02
-    """)
-
-    print("#BPM %f" % output_data['bpms'][0])
-    for i, bpm in enumerate(output_data['bpms']):
-        print("#BPM%02d %f" % (i + 1, output_data['bpms'][i]))
+        difficulty = ['nov', 'bsc', 'adv', 'ext', 'mst'][chart['header']['difficulty']]
+        game_initial = ['d', 'g', 'b', 'o', 'g1', 'g2'][chart['header']['game_type']]
+        output_filename = "%s_%04d_%s%s.dtx" % (game_initial,
+                                            input_json.get('musicid', 0),
+                                            difficulty,
+                                            origin_format)
 
 
-    for measure_idx in output_data['data']:
-        for eidx in output_data['data'][measure_idx]:
-            if eidx == 0x02:
-                print("#%03d%02X: %f" % (measure_idx, eidx, output_data['data'][measure_idx][eidx]))
+        print("Saving", output_filename)
+        output_filename = os.path.join(output_folder, output_filename)
 
-            else:
-                print("#%03d%02X: %s" % (measure_idx, eidx, "".join(["%02X" % x for x in output_data['data'][measure_idx][eidx]])))
+        with open(output_filename, "w") as outfile:
+            outfile.write("""#TITLE: (no title)
+            #ARTIST: (no artist)
+            #DLEVEL: 0
+            #GLEVEL: 0
+            #BLEVEL: 0\n""")
+
+            for sound_id in sorted(output_data['sound_ids']):
+                outfile.write("#WAV%02X: %04x.wav\n" % (sound_id, sound_id))
+
+            outfile.write("""#WAVZZ bgm.wav
+            #00001: ZZ
+            #000C2: 02
+            \n""")
+
+            outfile.write("#BPM %f\n" % output_data['bpms'][0])
+            for i, bpm in enumerate(output_data['bpms']):
+                outfile.write("#BPM%02d %f\n" % (i + 1, output_data['bpms'][i]))
 
 
-    return json.dumps(output_json, indent=4, sort_keys=True)
+            for measure_idx in output_data['data']:
+                for eidx in output_data['data'][measure_idx]:
+                    if eidx == 0x02:
+                        outfile.write("#%03d%02X: %f\n" % (measure_idx, eidx, output_data['data'][measure_idx][eidx]))
+
+                    else:
+                        outfile.write("#%03d%02X: %s\n" % (measure_idx, eidx, "".join(["%02X" % x for x in output_data['data'][measure_idx][eidx]])))
+
+
+
 
 
 class DtxFormat:

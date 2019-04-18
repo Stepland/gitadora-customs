@@ -5,7 +5,6 @@ import importlib
 import json
 import os
 import shutil
-import sys
 import threading
 
 import tmpfile
@@ -18,12 +17,17 @@ import event
 
 import plugins
 
+
 running_threads = []
+
 
 def find_handler(input_filename, input_format):
     formats = [importlib.import_module('plugins.' + name).get_class() for name in plugins.__all__]
 
     for handler in formats:
+        if not handler:
+            continue
+
         try:
             if input_format is not None and handler.get_format_name().lower() == input_format.lower():
                 return handler
@@ -128,7 +132,7 @@ def get_sound_metadata(sound_folder):
     return None
 
 
-if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser()
     input_group = parser.add_argument_group('input')
     input_group.add_argument('--input', help='Input file/folder')
@@ -137,12 +141,12 @@ if __name__ == "__main__":
     input_group.add_argument('--event-file', help='Input file containing event information (for SQ2/SQ3)')
 
     input_split_group = parser.add_argument_group('input_split')
-    for part in ['drum', 'guitar', 'bass', 'open']:
-        input_split_group.add_argument('--input-%s-nov' % part, help="DTX novice %s chart input (for creation)" % part)
-        input_split_group.add_argument('--input-%s-bsc' % part, help="DTX basic %s chart input (for creation)" % part)
-        input_split_group.add_argument('--input-%s-adv' % part, help="DTX advanced %s chart input (for creation)" % part)
-        input_split_group.add_argument('--input-%s-ext' % part, help="DTX extreme %s chart input (for creation)" % part)
-        input_split_group.add_argument('--input-%s-mst' % part, help="DTX master %s chart input (for creation)" % part)
+    for part in ['drum', 'guitar', 'bass', 'open', 'guitar2']:
+        input_split_group.add_argument('--input-%s-nov' % part, help="Novice %s chart input" % part)
+        input_split_group.add_argument('--input-%s-bsc' % part, help="Basic %s chart input" % part)
+        input_split_group.add_argument('--input-%s-adv' % part, help="Advanced %s chart input" % part)
+        input_split_group.add_argument('--input-%s-ext' % part, help="Extreme %s chart input" % part)
+        input_split_group.add_argument('--input-%s-mst' % part, help="Master %s chart input" % part)
 
     input_ifs_group = parser.add_argument_group('input_ifs')
     input_ifs_group.add_argument('--input-ifs-seq', help='Input file/folder for SEQ (IFS)')
@@ -154,28 +158,11 @@ if __name__ == "__main__":
 
     parser.add_argument('--parts', nargs='*', choices=['drum', 'guitar', 'bass', 'open', 'all'], default="all")
     parser.add_argument('--difficulty', nargs='*', choices=['nov', 'bsc', 'adv', 'ext', 'mst', 'all', 'max', 'min'], default="all")
-    parser.add_argument('--merge-guitars', action='store_true', help="Merge guitar charts")
-    parser.add_argument('--no-sounds', action='store_true', help="Don't convert sound files", default=False)
-    parser.add_argument('--copy-raw-files', action='store_true', help="Copy the raw files without processing", default=False)
-    parser.add_argument('--generate-bgms', action='store_true', help="Generate BGMs for various combination of instruments as needed (SQ2/SQ3)", default=False)
 
-    parser.add_argument('--music-db', help="Music database file to read metadata about song")
+    parser.add_argument('--no-sounds', action='store_true', help="Don't convert sound files", default=False)
+
     parser.add_argument('--music-id', type=int, help="Force a music ID", default=None)
 
-    parser.add_argument('--render-auto-name', action='store_true', help="Automatically name output file")
-    parser.add_argument('--render-ext', help="Force extension when rendering audio file", default=None)
-    parser.add_argument('--render-quality', help="Force quality (320k, etc) when rendering audio file", default="320k")
-    parser.add_argument('--render-volume', help="Force volume of selected part during rendering", default=100, type=int)
-    parser.add_argument('--render-volume-bgm', help="Force volume of BGM during rendering", default=100, type=int)
-    parser.add_argument('--render-volume-auto', help="Force volume of auto notes during rendering", default=100, type=int)
-    parser.add_argument('--render-no-bgm', action='store_true', help="Mute BGM during render", default=False)
-    parser.add_argument('--render-ignore-auto', action='store_true', help="Mute auto notes during render", default=False)
-
-    parser.add_argument('--dtx-pad-start', help="Pad the start of the song by x measures", default=0, type=int)
-    parser.add_argument('--dtx-pad-end', help="Pad the end of the song by x measures", default=2, type=int)
-    parser.add_argument('--dtx-fake-timesigs', help="Fake time signatures when converting to DTX to work around x/4 limitation", default=False, action='store_true')
-
-    parser.add_argument('--single-threaded', help="Process charts in single threads", default=False, action='store_true')
 
     args = parser.parse_args()
 
@@ -197,9 +184,8 @@ if __name__ == "__main__":
     if args.input_ifs_seq:
         if os.path.isdir(args.input_ifs_seq):
             filenames = glob.glob(args.input_ifs_seq + "/*")
-            ifs_path = args.input_ifs_seq
         else:
-            filenames, ifs_path = ifs.extract(args.input_ifs_seq)
+            filenames, _ = ifs.extract(args.input_ifs_seq)
 
         # Try to match charts with sound files, then extract as required
         guitar = {}
@@ -236,7 +222,7 @@ if __name__ == "__main__":
 
                 event_xml = eamxml.get_raw_xml(open(filename, "rb").read())
 
-                if len(event_xml) > 0:
+                if event_xml:
                     events = event.get_bonus_notes_by_timestamp(event_xml)
                     drum['events'] = events
                     guitar['events'] = events
@@ -251,26 +237,11 @@ if __name__ == "__main__":
         if not os.path.exists(sound_folder) and not args.no_sounds:
             os.makedirs(sound_folder)
 
-        if args.input_ifs_bgm and args.copy_raw_files:
-            if os.path.isdir(args.input_ifs_bgm):
-                filenames_bgm = glob.glob(args.input_ifs_bgm + "/*.bin")
-                ifs_path = args.input_ifs_bgm
-            else:
-                filenames_bgm, ifs_path = ifs.extract(args.input_ifs_bgm)
-
-            if not os.path.exists(args.output):
-                os.makedirs(args.output)
-
-            for filename in filenames_bgm:
-                output_filename = os.path.join(args.output, os.path.basename(filename))
-                shutil.copy2(filename, output_filename)
-
         if args.input_ifs_bgm and not args.no_sounds:
             if os.path.isdir(args.input_ifs_bgm):
                 filenames_bgm = glob.glob(args.input_ifs_bgm + "/*.bin")
-                ifs_path = args.input_ifs_bgm
             else:
-                filenames_bgm, ifs_path = ifs.extract(args.input_ifs_bgm)
+                filenames_bgm, _ = ifs.extract(args.input_ifs_bgm)
 
             for filename in filenames_bgm:
                 # Convert to WAV
@@ -307,9 +278,7 @@ if __name__ == "__main__":
                 "event_file": file_set['event'] if 'event' in file_set else None,
                 "parts": args.parts,
                 "difficulty": args.difficulty,
-                "merge_guitars": args.merge_guitars,
                 "events": file_set['events'] if 'events' in file_set else {},
-                "musicdb": args.music_db,
                 "musicid": args.music_id,
                 "input_split": {
                     "drum": {
@@ -341,33 +310,10 @@ if __name__ == "__main__":
                         "mst": args.input_open_mst,
                     }
                 },
-                "render_no_bgm": args.render_no_bgm,
-                "render_auto_name": args.render_auto_name,
-                "render_ext": args.render_ext,
-                "render_quality": args.render_quality,
-                "render_volume": args.render_volume,
-                "render_volume_bgm": args.render_volume_bgm,
-                "render_ignore_auto": args.render_ignore_auto,
-                "dtx_pad_start": args.dtx_pad_start,
-                "dtx_pad_end": args.dtx_pad_end,
-                "dtx_fake_timesigs": args.dtx_fake_timesigs,
                 "no_sounds": args.no_sounds,
-                "generate_bgms": args.generate_bgms,
             }
 
             process_file(params)
-
-
-            if args.input_ifs_seq and args.copy_raw_files:
-                if os.path.isdir(args.input_ifs_seq):
-                    filenames_seq = glob.glob(args.input_ifs_seq + "/*")
-                    ifs_path = args.input_ifs_seq
-                else:
-                    filenames_seq, ifs_path = ifs.extract(args.input_ifs_seq)
-
-                for filename in filenames_seq:
-                    output_filename = os.path.join(sound_folder, os.path.basename(filename))
-                    shutil.copy2(filename, output_filename)
 
         if "guitar" in args.parts or "bass" in args.parts or "open" in args.parts:
             if not args.single_threaded:
@@ -396,9 +342,7 @@ if __name__ == "__main__":
             "event_file": args.event_file if args.event_file else None,
             "parts": args.parts,
             "difficulty": args.difficulty,
-            "merge_guitars": args.merge_guitars,
             "events": event.get_bonus_notes_by_timestamp(eamxml.get_raw_xml(open(args.event_file, "rb").read())) if args.event_file else {},
-            "musicdb": args.music_db,
             "musicid": args.music_id,
             "input_split": {
                 "drum": {
@@ -430,29 +374,18 @@ if __name__ == "__main__":
                     "mst": args.input_open_mst,
                 }
             },
-            "render_no_bgm": args.render_no_bgm,
-            "render_auto_name": args.render_auto_name,
-            "render_ext": args.render_ext,
-            "render_quality": args.render_quality,
-            "render_volume": args.render_volume,
-            "render_volume_bgm": args.render_volume_bgm,
-            "render_ignore_auto": args.render_ignore_auto,
-            "dtx_pad_start": args.dtx_pad_start,
-            "dtx_pad_end": args.dtx_pad_end,
-            "dtx_fake_timesigs": args.dtx_fake_timesigs,
             "no_sounds": args.no_sounds,
-            "generate_bgms": args.generate_bgms,
         }
 
-        if not args.single_threaded:
-            parse_thread = threading.Thread(target=process_file, args=(params,))
-            parse_thread.start()
-            running_threads.append(parse_thread)
-        else:
-            process_file(params)
+        parse_thread = threading.Thread(target=process_file, args=(params,))
+        parse_thread.start()
+        running_threads.append(parse_thread)
 
-    if not args.single_threaded:
-        for thread in running_threads:
-            thread.join()
+    for thread in running_threads:
+        thread.join()
 
     tmpfile.tmpcleanup()
+
+
+if __name__ == "__main__":
+    main()

@@ -1,8 +1,7 @@
-import copy
 import json
 import struct
 
-USE_THREADS = True
+from plugins.sq import generate_json_from_data
 
 EVENT_ID_MAP = {
     0x01: "bpm",
@@ -217,22 +216,12 @@ REVERSE_NOTE_MAPPING = {
 }
 
 
-def combine_metadata_with_chart(metadata, chart):
-    chart_combined = copy.deepcopy(chart)
-    chart_combined['beat_data'] += metadata['beat_data']
-    return chart_combined
-
-
-########################
-#   SQ3 parsing code   #
-########################
-
 def parse_event_block(mdata, game, events={}):
     packet_data = {}
 
     timestamp = struct.unpack("<I", mdata[0x00:0x04])[0]
     beat = struct.unpack("<I", mdata[0x10:0x14])[0]
-    game_type_id = {"drum": 0, "guitar": 1, "bass": 2, "open": 3}[game]
+    game_type_id = {"drum": 0, "guitar": 1, "bass": 2}[game]
 
     if mdata[0x04] == 0x01:
         bpm_mpm = struct.unpack("<I", mdata[0x34:0x38])[0]
@@ -296,7 +285,7 @@ def parse_event_block(mdata, game, events={}):
     }
 
 
-def read_sq3_data(data, events):
+def read_sq3_data(data, events, other_params):
     output = {
         "beat_data": []
     }
@@ -336,85 +325,12 @@ def read_sq3_data(data, events):
     return output
 
 
-def parse_chart_intermediate(chart, events):
-    chart_raw = read_sq3_data(chart, events)
-
-    if not chart_raw:
-        return None
-
-    return chart_raw
-
-
-def split_charts_by_parts(charts):
-    guitar_charts = []
-    bass_charts = []
-
-    for chart in charts:
-        if chart['header']['is_metadata'] != 0:
-            continue
-
-        game_type = ["drum", "guitar", "bass"][chart['header']['game_type']]
-        if game_type == "guitar":
-            guitar_charts.append(chart)
-        elif game_type == "bass":
-            bass_charts.append(chart)
-
-    # Remove charts from chart list
-    for chart in guitar_charts:
-        charts.remove(chart)
-
-    for chart in bass_charts:
-        charts.remove(chart)
-
-    return charts, guitar_charts, bass_charts
-
-
-def combine_guitar_charts(guitar_charts, bass_charts):
-    # Combine guitar and bass charts
-    parsed_bass_charts = []
-
-    for chart in guitar_charts:
-        # Find equivalent chart
-        for chart2 in bass_charts:
-            if chart['header']['difficulty'] != chart2['header']['difficulty']:
-                continue
-
-            if 'level' in chart2['header']:
-                if 'level' not in chart['header']:
-                    chart['header']['level'] = {}
-
-                for k in chart2['header']['level']:
-                    chart['header']['level'][k] = chart2['header']['level'][k]
-
-            # Add all bass notes to guitar chart data
-            for timestamp_key in chart2['timestamp']:
-                for event in chart2['timestamp'][timestamp_key]:
-                    if event['name'] != "note":
-                        continue
-
-                    if timestamp_key not in chart['timestamp']:
-                        chart['timestamp'][timestamp_key] = []
-
-                    chart['timestamp'][timestamp_key].append(event)
-
-            parsed_bass_charts.append(chart2)
-
-    for chart in parsed_bass_charts:
-        bass_charts.remove(chart)
-
-    return guitar_charts, bass_charts
-
-
 def generate_json_from_sq3(params):
-    combine_guitars = params['merge_guitars'] if 'merge_guitars' in params else False
     data = open(params['input'], "rb").read() if 'input' in params else None
-    events = params['events'] if 'events' in params else {}
 
     if not data:
         print("No input file data")
         return
-
-    output_data = {}
 
     magic = data[0:4]
     if magic != bytearray("SEQP", encoding="ascii"):
@@ -423,50 +339,19 @@ def generate_json_from_sq3(params):
 
     data_offset, musicid, num_charts = struct.unpack("<III", data[0x10:0x1c])
 
+    if 'musicid' not in params:
+        params['musicid'] = musicid
+
     raw_charts = []
     for i in range(num_charts):
         data_size = struct.unpack("<I", data[data_offset:data_offset+4])[0]
         chart_data = data[data_offset+0x10:data_offset+0x10+data_size]
-        raw_charts.append(chart_data)
+        raw_charts.append((chart_data, None, None, None))
         data_offset += data_size
 
+    output_data = generate_json_from_data(params, read_sq3_data, raw_charts)
     output_data['musicid'] = musicid
     output_data['format'] = Sq3Format.get_format_name()
-
-    charts = []
-    for chart in raw_charts:
-        parsed_chart = parse_chart_intermediate(chart, events)
-
-        if not parsed_chart:
-            continue
-
-        charts.append(parsed_chart)
-        charts[-1]['header']['musicid'] = musicid
-
-    metadata_chart = None
-    for chart in charts:
-        if chart['header']['is_metadata'] == 1:
-            metadata_chart = chart
-            break
-
-    for chart_idx, chart in enumerate(charts):
-        if chart['header']['is_metadata'] == 1:
-            continue
-
-        charts[chart_idx] = combine_metadata_with_chart(metadata_chart, chart)
-
-    charts.remove(metadata_chart)
-
-    charts, guitar_charts, bass_charts = split_charts_by_parts(charts)
-
-    if combine_guitars:
-        guitar_charts, bass_charts = combine_guitar_charts(guitar_charts, bass_charts)
-
-    # Merge all charts back together after filtering, merging guitars etc
-    charts += guitar_charts
-    charts += bass_charts
-
-    output_data['charts'] = charts
 
     return json.dumps(output_data, indent=4, sort_keys=True)
 
