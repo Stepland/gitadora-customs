@@ -169,7 +169,7 @@ bass_range = list(range(0xa0, 0xa7 + 1)) + \
     list(range(0xda, 0xe8 + 1))
 
 
-def generate_output_data(chart, division=192):
+def generate_output_data(chart, game_type, division=192):
     def get_last_bpm(bpms, offset):
         last_bpm = 0
 
@@ -272,11 +272,11 @@ def generate_output_data(chart, division=192):
 
     def simplify_measures(chart):
         def can_divide_measure(measure, n):
-            div = len(output_data[measure_idx][event]) // n
+            div = len(measure) // n
 
             for j in range(0, div):
                 for k in range(1, n):
-                    if output_data[measure_idx][event][(j * n) + k] != 0:
+                    if measure[(j * n) + k] != 0:
                         return False
 
             return True
@@ -301,7 +301,66 @@ def generate_output_data(chart, division=192):
 
         return output_data
 
+    def generate_hold_release_events(events):
+        _events = []
+        for event in events:
+            _events.append(event)
+
+            if event['name'] == "note":
+                if 'guitar_special' in event['data'] and event['data']['guitar_special'] & 0x02:
+                    # Long note start
+                    new_note = copy.deepcopy(event)
+                    new_note['name'] = "_note_start"
+
+                    _events.append(new_note)
+
+                    # Long note end
+                    new_note = copy.deepcopy(event)
+                    new_note['name'] = "_note_release"
+
+                    timestamp_offset = 0
+                    while True:
+                        new_timestamp = event['timestamp'] + event['data']['hold_duration'] - timestamp_offset
+
+                        found_note = False
+                        for event2 in events:
+                            if event2['timestamp'] == new_timestamp and event2['name'] == "note":
+                                found_note = True
+                                timestamp_offset += 1
+                                break
+
+                        if not found_note:
+                            break
+
+                    new_note['timestamp'] = new_timestamp
+                    new_note['timestamp_ms'] = new_timestamp / 300
+
+                    _events.append(new_note)
+
+        return _events
+
+
+    def generate_sound_id_map(events):
+        used_sound_ids = {}
+        sound_id_lookup = {}
+
+        cur_sound_id = 1
+
+        for event in events:
+            if event['name'] == "note":
+                if event['data']['sound_id'] not in sound_id_lookup:
+                    sound_id_lookup[event['data']['sound_id']] = cur_sound_id
+                    used_sound_ids[cur_sound_id] = event['data']['sound_id']
+                    cur_sound_id += 1
+
+                event['data']['sound_id'] = sound_id_lookup[event['data']['sound_id']]
+
+        return events, used_sound_ids
+
+
     events = get_events_from_chart(chart)
+    events, used_sound_ids = generate_sound_id_map(events)
+    events = generate_hold_release_events(events)
     measures = get_measures(events)
     bpm_per_measure = get_bpm_per_measure(measures)
     bpm_list = get_bpm_list(bpm_per_measure)
@@ -310,7 +369,6 @@ def generate_output_data(chart, division=192):
     display_bar = True
 
     output_data = {}
-    used_sound_ids = []
     for event in events:
         measure_idx, beat_idx = get_nearest_beat(mapping, event['timestamp_ms'])
 
@@ -319,6 +377,8 @@ def generate_output_data(chart, division=192):
                 0x08: [0x00] * division, # BPM
                 0x50: [0x00] * division, # Show measure bar
                 0x51: [0x00] * division, # Show beat bar
+                0x2c: [0x00] * division, # Guitar long note
+                0x2d: [0x00] * division, # Bass long note
             }
 
             for k in reverse_dtx_mapping:
@@ -353,8 +413,55 @@ def generate_output_data(chart, division=192):
             else:
                 output_data[measure_idx][dtx_mapping[event['data']['note']]][beat_idx] = event['data']['sound_id']
 
-            if event['data']['sound_id'] not in used_sound_ids:
-                used_sound_ids.append(event['data']['sound_id'])
+
+    for event in events:
+        longnote_fields = {
+            'g': 0x2c,
+            'b': 0x2d,
+            'o': 0x2c,
+            'g1': 0x2c,
+            'g2': 0x2d,
+        }[game_type]
+
+        if event['name'] == "_note_start":
+            measure_idx, beat_idx = get_nearest_beat(mapping, event['timestamp_ms'])
+            output_data[measure_idx][longnote_fields][beat_idx] = 0x01
+
+        elif event['name'] == "_note_release":
+            measure_idx, beat_idx = get_nearest_beat(mapping, event['timestamp_ms'])
+
+            check_events = {
+                'g': guitar_range,
+                'b': bass_range,
+                'o': guitar_range,
+                'g1': guitar_range,
+                'g2': bass_range,
+            }[game_type]
+
+            while True:
+                updated = False
+
+                for check_event in check_events:
+                    if measure_idx not in output_data or check_event not in output_data[measure_idx]:
+                        continue
+
+                    if output_data[measure_idx][check_event][beat_idx] != 0:
+                        if beat_idx == 0:
+                            measure_idx -= 1
+                            beat_idx = division
+
+                        beat_idx -= 1
+                        updated = True
+                        break
+
+                if not updated:
+                    if measure_idx not in output_data:
+                        output_data[measure_idx] = {
+                            longnote_fields: [0x00] * division, # Long note
+                        }
+
+                    output_data[measure_idx][longnote_fields][beat_idx] = 0x01
+                    break
 
     return {
         'data': simplify_measures(output_data),
@@ -375,10 +482,12 @@ def create_dtx_from_json(params):
         origin_format = ""
 
     for chart in input_json['charts']:
-        output_data = generate_output_data(chart)
-
         difficulty = ['nov', 'bsc', 'adv', 'ext', 'mst'][chart['header']['difficulty']]
         game_initial = ['d', 'g', 'b', 'o', 'g1', 'g2'][chart['header']['game_type']]
+        sound_initial = ['drum', 'guitar', 'guitar', 'guitar', 'guitar', 'guitar'][chart['header']['game_type']]
+
+        output_data = generate_output_data(chart, game_initial)
+
         output_filename = "%s_%04d_%s%s.dtx" % (game_initial,
                                             input_json.get('musicid', 0),
                                             difficulty,
@@ -395,8 +504,8 @@ def create_dtx_from_json(params):
             #GLEVEL: 0
             #BLEVEL: 0\n""")
 
-            for sound_id in sorted(output_data['sound_ids']):
-                outfile.write("#WAV%02X: %04x.wav\n" % (sound_id, sound_id))
+            for k in output_data['sound_ids']:
+                outfile.write("#WAV%s: %s\n" % (base_repr(k, 36, padding=2)[-2:], os.path.join(sound_initial, "%04x.wav" % output_data['sound_ids'][k])))
 
             outfile.write("""#WAVZZ bgm.wav
             #00001: ZZ
@@ -415,9 +524,6 @@ def create_dtx_from_json(params):
 
                     else:
                         outfile.write("#%03d%02X: %s\n" % (measure_idx, eidx, "".join(["%02X" % x for x in output_data['data'][measure_idx][eidx]])))
-
-
-
 
 
 class DtxFormat:

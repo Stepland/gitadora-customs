@@ -5,7 +5,10 @@ def combine_metadata_with_chart(metadata, chart):
         return chart
 
     chart_combined = copy.deepcopy(chart)
-    chart_combined['beat_data'] += metadata['beat_data']
+
+    for event in metadata['beat_data']:
+        if event['name'] in ['measure', 'beat']:
+            chart_combined['beat_data'].append(event)
 
     return chart_combined
 
