@@ -20,21 +20,6 @@ EVENT_ID_MAP = {
 
 EVENT_ID_REVERSE = {EVENT_ID_MAP[k]: k for k in EVENT_ID_MAP}
 
-DIFFICULTY_LEVELS_MAP = {
-    0x00: "NOV",
-    0x01: "BSC",
-    0x02: "ADV",
-    0x03: "EXT",
-    0x04: "MST"
-}
-
-GAMES_MAP = {
-    0x00: "Drums",
-    0x01: "Guitar",
-    0x02: "Bass",
-    0x03: "Open",
-}
-
 NOTE_MAPPING = {
     'drum': {
         0x00: "hihat",
