@@ -502,8 +502,6 @@ def generate_sq3_from_json(params):
         with open(os.path.join(params['output'], output_filename), "wb") as outfile:
             outfile.write(output_data)
 
-    print(found_parts)
-
 
 def read_sq3_data(data, events, other_params):
     def parse_event_block(output, game, events={}):
@@ -517,6 +515,7 @@ def read_sq3_data(data, events, other_params):
             bpm_mpm = struct.unpack("<I", output[0x34:0x38])[0]
             packet_data['bpm'] = 60000000 / bpm_mpm
             # print(timestamp, packet_data)
+
         elif output[0x04] == 0x02:
             # Time signature is represented as numerator/(1<<denominator)
             packet_data['numerator'] = output[0x34]
@@ -524,8 +523,10 @@ def read_sq3_data(data, events, other_params):
             packet_data['denominator_orig'] = output[0x35]
 
             # print(timestamp, packet_data)
+
         elif output[0x04] == 0x07:
             packet_data['unk'] = struct.unpack("<I", output[0x14:0x18])[0]  # What is this?
+
         elif output[0x04] == 0x10:
             packet_data['hold_duration'] = struct.unpack("<I", output[0x08:0x0c])[0]
             packet_data['unk'] = struct.unpack("<I", output[0x14:0x18])[0]  # What is this?

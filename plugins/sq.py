@@ -90,19 +90,34 @@ def generate_json_from_data(params, read_data_callback, raw_charts):
         return charts, guitar_charts, bass_charts, open_charts, guitar1_charts, guitar2_charts
 
 
-    def add_note_durations(chart, sound_metadata):
+    def add_note_durations(chart, params):
+        def get_duration_from_file(sound_metadata, entry):
+            if 'duration' in entry and entry['duration'] != 0:
+                return entry['duration']
+
+            filename = entry['filename']
+
+            if 'NoFilename' in entry['flags']:
+                filename = "%04x.wav" % entry['sound_id']
+
+            print(entry)
+            exit(1)
+
+            return audio.get_duration(os.path.join(params['sound_folder'], filename))
+
+        sound_metadata = params.get('sound_metadata', [])
         duration_lookup = {}
 
         if not sound_metadata or 'entries' not in sound_metadata:
             return chart
 
         for entry in sound_metadata['entries']:
-            duration_lookup[entry['sound_id']] = entry.get('duration', 0)
+            duration_lookup[entry['sound_id']] = get_duration_from_file(sound_metadata, entry)
 
-        for k in chart['timestamp']:
-            for i in range(0, len(chart['timestamp'][k])):
-                if chart['timestamp'][k][i]['name'] in ['note', 'auto'] and 'note_length' not in chart['timestamp'][k][i]['data']:
-                    chart['timestamp'][k][i]['data']['note_length'] = int(round(duration_lookup.get(chart['timestamp'][k][i]['data']['sound_id'], 0) * 300))
+        for event in chart['beat_data']:
+            if event['name'] in ['note', 'auto'] and 'note_length' not in event['data']:
+                event['data']['note_length'] = int(round(duration_lookup.get(event['data']['sound_id'], 0) * 300))
+                print("Calculating note duration", event['data']['note_length'], event['data']['sound_id'], event['data']['sound_id']in duration_lookup)
 
         return chart
 
@@ -153,7 +168,7 @@ def generate_json_from_data(params, read_data_callback, raw_charts):
 
         game_type = ["drum", "guitar", "bass", "open", "guitar1", "guitar2"][parsed_chart['header']['game_type']]
         if game_type in ["guitar", "bass", "open"]:
-            parsed_chart = add_note_durations(parsed_chart, params.get('sound_metadata', []))
+            parsed_chart = add_note_durations(parsed_chart, params)
 
         charts.append(parsed_chart)
         charts[-1]['header']['musicid'] = params['musicid']

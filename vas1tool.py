@@ -23,24 +23,6 @@ FLAG_MAP = {
     "NoFilename": 0x0100
 }
 
-VOLUME_TABLE = [ 0, 14, 21, 28,  33,  37,  41,  44,
-                47, 50, 53, 55,  57,  59,  61,  63,
-                65, 66, 67, 68,  69,  70,  71,  71,
-                72, 72, 73, 73,  74,  74,  75,  75,
-                76, 76, 77, 77,  78,  78,  79,  79,
-                80, 80, 81, 81,  82,  82,  82,  83,
-                83, 83, 84, 84,  84,  85,  85,  85,
-                86, 86, 86, 87,  87,  87,  88,  88,
-                88, 88, 89, 89,  89,  89,  90,  90,
-                90, 90, 91, 91,  91,  91,  92,  92,
-                92, 92, 92, 93,  93,  93,  93,  93,
-                94, 94, 94, 94,  95,  95,  95,  95,
-                95, 96, 96, 96,  96,  96,  97,  97,
-                97, 97, 97, 97,  98,  98,  98,  98,
-                98, 98, 98, 98,  99,  99,  99,  99,
-                99, 99, 99, 99, 100, 100, 100, 100 ]
-
-
 def read_vas3(input_filename, output_folder, force_hex=False, mix_audio=False, is_guitar=False):
     data = open(input_filename, "rb").read()
 
@@ -51,17 +33,29 @@ def read_vas3(input_filename, output_folder, force_hex=False, mix_audio=False, i
         print("No files to extract")
         exit(1)
 
+
+
+    default_hihat = 0x64
+    default_snare = 0x26
+    default_bass = 0x24
+    default_hightom = 0x30
+    default_lowtom = 0x29
+    default_rightcymbal = 0x31
+    default_leftcymbal = 0xfff0
+    default_floortom = 0xfff1
+    default_leftpedal = 0xfff2
+
     entries = []
     for i in range(entry_count):
         # sound_flag seems to be related to defaults. If something is set to default, it is 0x02. Else it's 0x04 (for GDXG). Always 0 for GDXH?
         # entry_unk4 seems to always be 255??
         metadata_offset, offset, filesize = struct.unpack("<III", data[entry_start+(i*0x0c):entry_start+(i*0x0c)+0x0c])
-        metadata_unk1_1, volume, metadata_unk1_3, sound_id, sound_id2, metadata_unk2_2, metadata_unk2_3, metadata_unk2_4, metadata_unk3, sample_rate = struct.unpack("<BBBBBBBBHH", data[entry_start+metadata_offset+(entry_count*0x0c):entry_start+metadata_offset+(entry_count*0x0c)+0x0c])
+        metadata_unk1_1, metadata_unk1_2, metadata_unk1_3, sound_id, instrument_id, metadata_unk2_2, metadata_unk2_3, metadata_unk2_4, metadata_unk3, sample_rate = struct.unpack("<BBBBBBBBHH", data[entry_start+metadata_offset+(entry_count*0x0c):entry_start+metadata_offset+(entry_count*0x0c)+0x0c])
         sample_rate *= 2
 
         #output_filename = os.path.join(basepath, "{}.wav".format(entry['filename']))
 
-        print("%04x | %08x %08x %08x | %02x %02x %02x %02x  %02x %02x %02x %02x  %04x  %04x | %08x" % (i, metadata_offset, offset, filesize, metadata_unk1_1, volume, metadata_unk1_3, sound_id, sound_id2, metadata_unk2_2, metadata_unk2_3, metadata_unk2_4, sample_rate, metadata_unk3, entry_start+metadata_offset+(entry_count*0x0c)))
+        print("%04x | %08x %08x %08x | %02x %02x %02x %02x  %02x %02x %02x %02x  %04x  %04x | %08x" % (i, metadata_offset, offset, filesize, metadata_unk1_1, metadata_unk1_2, metadata_unk1_3, sound_id, instrument_id, metadata_unk2_2, metadata_unk2_3, metadata_unk2_4, sample_rate, metadata_unk3, entry_start+metadata_offset+(entry_count*0x0c)))
 
         offset += ((entry_count * 0x0c) * 2) + 4
 
@@ -76,6 +70,25 @@ def read_vas3(input_filename, output_folder, force_hex=False, mix_audio=False, i
 
     if not os.path.exists(basepath):
         os.makedirs(basepath)
+
+    metadata = {
+        'type': "GDXG" if is_guitar else "GDXH",
+        'version': 1,
+        'defaults': {
+            'default_hihat': default_hihat,
+            'default_snare': default_snare,
+            'default_bass': default_bass,
+            'default_hightom': default_hightom,
+            'default_lowtom': default_lowtom,
+            'default_rightcymbal': default_rightcymbal,
+            'default_leftcymbal': default_leftcymbal,
+            'default_floortom': default_floortom,
+            'default_leftpedal': default_leftpedal,
+        },
+        'gdx_type_unk1': 0,
+        'gdx_volume_flag': 1,
+        'entries': [],
+    }
 
     for idx, entry_info in enumerate(entries[:-1]):
         entry, filesize, sound_id = entry_info
@@ -92,6 +105,20 @@ def read_vas3(input_filename, output_folder, force_hex=False, mix_audio=False, i
 
         audio.get_wav_from_pcm(output_filename)
         os.remove(output_filename)
+
+        volume = 127
+        pan = 64
+
+        metadata['entries'].append({
+            'sound_id': sound_id,
+            'filename': "",
+            'volume': volume,
+            'pan': pan,
+            'extra': 255, # Unknown
+            'flags': ['NoFilename'],
+        })
+
+    open(os.path.join(basepath, "metadata.json"), "w").write(json.dumps(metadata, indent=4))
 
 
 if __name__ == "__main__":
