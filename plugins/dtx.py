@@ -352,12 +352,17 @@ def generate_output_data(chart, game_type, division=192):
 
         for event in events:
             if event['name'] == "note":
-                if event['data']['sound_id'] not in sound_id_lookup:
-                    sound_id_lookup[event['data']['sound_id']] = cur_sound_id
-                    used_sound_ids[cur_sound_id] = event['data']['sound_id']
+                sound_key = "%d_%d" % (event['data']['sound_id'], event['data'].get('note_length', 0))
+
+                if sound_key not in sound_id_lookup:
+                    sound_id_lookup[sound_key] = cur_sound_id
+                    used_sound_ids[cur_sound_id] = {
+                        'filename': "%04x" % event['data']['sound_id'],
+                        'duration': event['data'].get('note_length', 0)
+                    }
                     cur_sound_id += 1
 
-                event['data']['sound_id'] = sound_id_lookup[event['data']['sound_id']]
+                event['data']['sound_id'] = sound_id_lookup[sound_key]
 
         return events, used_sound_ids
 
@@ -383,6 +388,13 @@ def generate_output_data(chart, game_type, division=192):
                 0x51: [0x00] * division, # Show beat bar
                 0x2c: [0x00] * division, # Guitar long note
                 0x2d: [0x00] * division, # Bass long note
+                0xc2: [0x00] * division, # End position
+                0x28: [0x00] * division, # Guitar Wail
+                0xa8: [0x00] * division, # Bass Wail
+                0x4c: [0x00] * division, # Bonus note #1
+                0x4d: [0x00] * division, # Bonus note #2
+                0x4e: [0x00] * division, # Bonus note #3
+                0x4f: [0x00] * division, # Bonus note #4
             }
 
             for k in reverse_dtx_mapping:
@@ -400,6 +412,9 @@ def generate_output_data(chart, game_type, division=192):
         elif event['name'] == "baroff":
             display_bar = False
 
+        elif event['name'] == "endpos":
+            output_data[measure_idx][0xc2][beat_idx] = 0x01
+
         elif event['name'] == "measure":
             output_data[measure_idx][0x50][beat_idx] = 0x01 if display_bar else 0x00
 
@@ -416,6 +431,53 @@ def generate_output_data(chart, game_type, division=192):
 
             else:
                 output_data[measure_idx][dtx_mapping[event['data']['note']]][beat_idx] = event['data']['sound_id']
+
+            if 'guitar_special' in event['data'] and event['data']['guitar_special'] & 0x01:
+                if event['data']['wail_misc'] == 2:
+                    # Down wail
+                    # Currently down wailing isn't supported by any simulator,
+                    # so just use up wail's commands for now
+                    wail_field = {
+                        'd': -1,
+                        'g': 0x28,
+                        'b': 0xa8,
+                        'o': 0x28,
+                        'g1': 0x28,
+                        'g2': 0xa8,
+                    }[game_type]
+
+                    wail_direction = 2
+
+                else:  # 0, 1, ?
+                    # Up wail
+                    wail_field = {
+                        'd': -1,
+                        'g': 0x28,
+                        'b': 0xa8,
+                        'o': 0x28,
+                        'g1': 0x28,
+                        'g2': 0xa8,
+                    }[game_type]
+
+                    wail_direction = 1
+
+                output_data[measure_idx][wail_field][beat_idx] = wail_direction
+
+            if event['data'].get('bonus_note') and event['data']['note'] in dtx_bonus_mapping:
+                bonus_note_lane = 0x4f
+
+                while bonus_note_lane >= 0x4c:
+                    if output_data[measure_idx][bonus_note_lane][beat_idx] != 0:
+                        bonus_note_lane -= 1
+                        continue
+
+                    output_data[measure_idx][bonus_note_lane][beat_idx] = dtx_bonus_mapping[event['data']['note']]
+                    break
+
+                if bonus_note_lane < 0x4c:
+                    print("Couldn't find enough bonus note lanes")
+
+
 
 
     for event in events:
@@ -513,8 +575,18 @@ def create_dtx_from_json(params):
             #GLEVEL: 0
             #BLEVEL: 0\n""")
 
+
+            comment_json = {
+                'sound_lengths': {}
+            }
+
             for k in output_data['sound_ids']:
-                outfile.write("#WAV%s: %s\n" % (convert_base36(k, 2), os.path.join(sound_initial, "%04x.wav" % output_data['sound_ids'][k])))
+                comment_json['sound_lengths'][k] = output_data['sound_ids'][k]['duration']
+
+            outfile.write("#COMMENT %s\n" % json.dumps(comment_json))
+
+            for k in output_data['sound_ids']:
+                outfile.write("#WAV%s: %s\n" % (convert_base36(k, 2), os.path.join(sound_initial, "%s.wav" % output_data['sound_ids'][k]['filename'])))
 
             outfile.write("""#WAVZZ: %s
             #00001: ZZ
