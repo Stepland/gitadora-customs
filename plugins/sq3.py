@@ -205,25 +205,13 @@ REVERSE_NOTE_MAPPING = {
     "b_rgbyp": 0x1f,
 }
 
-beat_by_timestamp = {}
-last_beat = 0
-
 def generate_sq3_from_json(params):
 
     def build_command(event, game_type):
         output = bytearray(0x40)
 
-        global last_beat, beat_by_timestamp
-        if event['timestamp'] not in beat_by_timestamp:
-            beat_by_timestamp[event['timestamp']] = last_beat
-            last_beat += 480
-
-        else:
-            last_beat = beat_by_timestamp[event['timestamp']]
-
         output[0x00:0x04] = struct.pack("<I", event['timestamp'])
         output[0x04] = EVENT_ID_REVERSE[event['name']] & 0xff
-        output[0x10:0x14] = struct.pack("<I", beat_by_timestamp[event['timestamp']])
 
         if event['name'] == "bpm":
             output[0x34:0x38] = struct.pack("<I", int(round(60000000 / event['data']['bpm'])))
@@ -375,27 +363,6 @@ def generate_sq3_from_json(params):
                 'timestamp': 0,
                 'timestamp_ms': 0,
                 'data': {},
-            }, 0)
-
-        if not contains_command(chart['beat_data'], 'bpm'):
-            output += build_command({
-                'name': 'bpm',
-                'timestamp': 0,
-                'timestamp_ms': 0,
-                'data': {
-                    'bpm': 120,
-                },
-            }, 0)
-
-        if not contains_command(chart['beat_data'], 'barinfo'):
-            output += build_command({
-                'name': 'barinfo',
-                'timestamp': 0,
-                'timestamp_ms': 0,
-                'data': {
-                    'numerator': 4,
-                    'denominator': 4,
-                },
             }, 0)
 
         if not contains_command(chart['beat_data'], 'baron'):
