@@ -1,137 +1,136 @@
 import copy
 
-def combine_metadata_with_chart(metadata, chart):
-    if not metadata:
-        return chart
+def generate_json_from_data(params, read_data_callback, raw_charts):
+    def combine_metadata_with_chart(metadata, chart):
+        if not metadata:
+            return chart
 
-    chart_combined = copy.deepcopy(chart)
+        chart_combined = copy.deepcopy(chart)
 
-    for event in metadata['beat_data']:
-        if event['name'] in ['measure', 'beat']:
-            chart_combined['beat_data'].append(event)
+        for event in metadata['beat_data']:
+            if event['name'] in ['measure', 'beat']:
+                chart_combined['beat_data'].append(event)
 
-    return chart_combined
+        return chart_combined
 
 
-def combine_guitar_charts(guitar_charts, bass_charts):
-    # Combine guitar and bass charts
-    parsed_bass_charts = []
+    def combine_guitar_charts(guitar_charts, bass_charts):
+        # Combine guitar and bass charts
+        parsed_bass_charts = []
 
-    for chart in guitar_charts:
-        # Find equivalent chart
-        for chart2 in bass_charts:
-            if chart['header']['difficulty'] != chart2['header']['difficulty']:
+        for chart in guitar_charts:
+            # Find equivalent chart
+            for chart2 in bass_charts:
+                if chart['header']['difficulty'] != chart2['header']['difficulty']:
+                    continue
+
+                if 'level' in chart2['header']:
+                    if 'level' not in chart['header']:
+                        chart['header']['level'] = {}
+
+                    for k in chart2['header']['level']:
+                        chart['header']['level'][k] = chart2['header']['level'][k]
+
+                    for event in chart2['timestamp'][timestamp_key]:
+                        if event['name'] != "note":
+                            continue
+
+                        if timestamp_key not in chart['timestamp']:
+                            chart['timestamp'][timestamp_key] = []
+
+                        chart['timestamp'][timestamp_key].append(event)
+
+                parsed_bass_charts.append(chart2)
+
+        for chart in parsed_bass_charts:
+            bass_charts.remove(chart)
+
+        return guitar_charts, bass_charts
+
+
+    def split_charts_by_parts(charts):
+        guitar_charts = []
+        bass_charts = []
+        open_charts = []
+        guitar1_charts = []
+        guitar2_charts = []
+
+        for chart in charts:
+            if chart['header']['is_metadata'] != 0:
                 continue
 
-            if 'level' in chart2['header']:
-                if 'level' not in chart['header']:
-                    chart['header']['level'] = {}
+            game_type = ["drum", "guitar", "bass", "open", "guitar1", "guitar2"][chart['header']['game_type']]
+            if game_type == "guitar":
+                guitar_charts.append(chart)
+            elif game_type == "bass":
+                bass_charts.append(chart)
+            elif game_type == "open":
+                open_charts.append(chart)
+            elif game_type == "guitar1":
+                guitar1_charts.append(chart)
+            elif game_type == "guitar2":
+                guitar2_charts.append(chart)
 
-                for k in chart2['header']['level']:
-                    chart['header']['level'][k] = chart2['header']['level'][k]
+        # Remove charts from chart list
+        for chart in guitar_charts:
+            charts.remove(chart)
 
-                for event in chart2['timestamp'][timestamp_key]:
-                    if event['name'] != "note":
-                        continue
+        for chart in bass_charts:
+            charts.remove(chart)
 
-                    if timestamp_key not in chart['timestamp']:
-                        chart['timestamp'][timestamp_key] = []
+        for chart in open_charts:
+            charts.remove(chart)
 
-                    chart['timestamp'][timestamp_key].append(event)
+        for chart in guitar1_charts:
+            charts.remove(chart)
 
-            parsed_bass_charts.append(chart2)
+        for chart in guitar2_charts:
+            charts.remove(chart)
 
-    for chart in parsed_bass_charts:
-        bass_charts.remove(chart)
-
-    return guitar_charts, bass_charts
-
-
-def split_charts_by_parts(charts):
-    guitar_charts = []
-    bass_charts = []
-    open_charts = []
-    guitar1_charts = []
-    guitar2_charts = []
-
-    for chart in charts:
-        if chart['header']['is_metadata'] != 0:
-            continue
-
-        game_type = ["drum", "guitar", "bass", "open", "guitar1", "guitar2"][chart['header']['game_type']]
-        if game_type == "guitar":
-            guitar_charts.append(chart)
-        elif game_type == "bass":
-            bass_charts.append(chart)
-        elif game_type == "open":
-            open_charts.append(chart)
-        elif game_type == "guitar1":
-            guitar1_charts.append(chart)
-        elif game_type == "guitar2":
-            guitar2_charts.append(chart)
-
-    # Remove charts from chart list
-    for chart in guitar_charts:
-        charts.remove(chart)
-
-    for chart in bass_charts:
-        charts.remove(chart)
-
-    for chart in open_charts:
-        charts.remove(chart)
-
-    for chart in guitar1_charts:
-        charts.remove(chart)
-
-    for chart in guitar2_charts:
-        charts.remove(chart)
-
-    return charts, guitar_charts, bass_charts, open_charts, guitar1_charts, guitar2_charts
+        return charts, guitar_charts, bass_charts, open_charts, guitar1_charts, guitar2_charts
 
 
-def add_note_durations(chart, sound_metadata):
-    duration_lookup = {}
+    def add_note_durations(chart, sound_metadata):
+        duration_lookup = {}
 
-    if not sound_metadata or 'entries' not in sound_metadata:
+        if not sound_metadata or 'entries' not in sound_metadata:
+            return chart
+
+        for entry in sound_metadata['entries']:
+            duration_lookup[entry['sound_id']] = entry.get('duration', 0)
+
+        for k in chart['timestamp']:
+            for i in range(0, len(chart['timestamp'][k])):
+                if chart['timestamp'][k][i]['name'] in ['note', 'auto'] and 'note_length' not in chart['timestamp'][k][i]['data']:
+                    chart['timestamp'][k][i]['data']['note_length'] = int(round(duration_lookup.get(chart['timestamp'][k][i]['data']['sound_id'], 0) * 300))
+
         return chart
 
-    for entry in sound_metadata['entries']:
-        duration_lookup[entry['sound_id']] = entry.get('duration', 0)
 
-    for k in chart['timestamp']:
-        for i in range(0, len(chart['timestamp'][k])):
-            if chart['timestamp'][k][i]['name'] in ['note', 'auto'] and 'note_length' not in chart['timestamp'][k][i]['data']:
-                chart['timestamp'][k][i]['data']['note_length'] = int(round(duration_lookup.get(chart['timestamp'][k][i]['data']['sound_id'], 0) * 300))
+    def remove_extra_beats(chart):
+        new_beat_data = []
+        found_measures = []
 
-    return chart
+        for x in sorted(chart['beat_data'], key=lambda x: int(x['timestamp'])):
+            if x['name'] == "measure":
+                found_measures.append(x['timestamp'])
 
+        discarded_beats = []
+        for x in sorted(chart['beat_data'], key=lambda x: int(x['timestamp'])):
+            if x['name'] == "beat" and x['timestamp'] in found_measures:
+                discarded_beats.append(x['timestamp'])
+                continue
 
-def remove_extra_beats(chart):
-    new_beat_data = []
-    found_measures = []
+            new_beat_data.append(x)
 
-    for x in sorted(chart['beat_data'], key=lambda x: int(x['timestamp'])):
-        if x['name'] == "measure":
-            found_measures.append(x['timestamp'])
+        for idx, x in enumerate(new_beat_data):
+            if x['name'] == "measure" and x['timestamp'] in discarded_beats:
+                new_beat_data[idx]['merged_beat'] = True
 
-    discarded_beats = []
-    for x in sorted(chart['beat_data'], key=lambda x: int(x['timestamp'])):
-        if x['name'] == "beat" and x['timestamp'] in found_measures:
-            discarded_beats.append(x['timestamp'])
-            continue
+        chart['beat_data'] = new_beat_data
 
-        new_beat_data.append(x)
+        return chart
 
-    for idx, x in enumerate(new_beat_data):
-        if x['name'] == "measure" and x['timestamp'] in discarded_beats:
-            new_beat_data[idx]['merged_beat'] = True
-
-    chart['beat_data'] = new_beat_data
-
-    return chart
-
-
-def generate_json_from_data(params, read_data_callback, raw_charts):
     combine_guitars = params['merge_guitars'] if 'merge_guitars' in params else False
     events = params['events'] if 'events' in params else {}
 
