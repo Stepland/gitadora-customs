@@ -3,6 +3,8 @@ import struct
 
 from plugins.sq import generate_json_from_data
 
+VALID_METACOMMANDS = ['startpos', 'endpos', 'baron', 'baroff', 'measure', 'beat', 'unk0c', 'bpm', 'barinfo']
+
 EVENT_ID_MAP = {
     0x01: "bpm",
     0x02: "barinfo",
@@ -201,48 +203,330 @@ REVERSE_NOTE_MAPPING = {
     "b_rgbyp": 0x1f,
 }
 
+def generate_sq3_from_json(params):
+    def build_command(event, game_type):
+        output = bytearray(0x40)
+
+        output[0x00:0x04] = struct.pack("<I", event['timestamp'])
+        output[0x04] = EVENT_ID_REVERSE[event['name']] & 0xff
+        # output[0x10:0x14] = struct.pack("<I", event['beat'])
+
+        if event['name'] == "bpm":
+            output[0x34:0x38] = struct.pack("<I", int(round(60000000 / event['data']['bpm'])))
+
+        elif event['name'] == "barinfo":
+            output[0x34] = event['data']['numerator'] & 0xff
+
+            denominator = 1 << (event['data']['denominator'].bit_length() - 1)
+            if denominator != event['data']['denominator']:
+                raise Exception("ERROR: The time signature denominator must be divisible by 2."
+                                "Found {}".format(event['data']['denominator']))
+
+            output[0x35] = (event['data']['denominator'].bit_length() - 1) & 0xff
+
+        elif event['name'] == "chipstart":
+            if 'unk' in event['data']:
+                output[0x14:0x18] = struct.pack("<I", event['data']['unk'])
+
+        elif event['name'] == "note":
+            if event['data']['note'] not in REVERSE_NOTE_MAPPING:
+                # Set all unknown events to auto play
+                REVERSE_NOTE_MAPPING[event['data']['note']] = 0xff
+
+            if 'hold_duration' in event['data']:
+                output[0x08:0x0c] = struct.pack("<I", event['data']['hold_duration'])
+
+            if 'unk' in event['data']:
+                output[0x14:0x18] = struct.pack("<I", event['data']['unk'])
+
+            else:
+                output[0x14:0x18] = struct.pack("<I", 0x16c)
+
+            if 'sound_id' in event['data']:
+                output[0x20:0x24] = struct.pack("<I", event['data']['sound_id'])
+
+            if game_type != 0:
+                if 'note_length' in event['data']:
+                    output[0x24:0x28] = struct.pack("<I", event['data']['note_length'])
+
+                else:
+                    output[0x24:0x28] = struct.pack("<I", 0x40)
+
+            if 'volume' in event['data']:
+                output[0x2d] = event['data']['volume'] & 0xff
+
+            if 'auto_volume' in event['data']:
+                output[0x2e] = event['data']['auto_volume'] & 0xff
+
+            if 'note' in event['data']:
+                output[0x30] = REVERSE_NOTE_MAPPING[event['data']['note']] & 0xff
+
+            if 'wail_misc' in event['data']:
+                output[0x31] = event['data']['wail_misc'] & 0xff
+
+            if 'guitar_special' in event['data']:
+                output[0x32] = event['data']['guitar_special'] & 0xff
+
+            if 'auto_note' in event['data']:
+                output[0x34] = event['data']['auto_note'] & 0xff
+
+            if event['data'].get('note') == "auto":
+                output[0x34] = 1  # Auto note
+                output[0x2e] = 1  # Auto volume
+
+        return output
+
+
+    def contains_command(chart, command):
+        for event in chart:
+            if event['name'] == command:
+                return True
+
+        return False
+
+
+    def calculate_last_measure_duration(chart):
+        measure_timestamps = []
+
+        for event in chart:
+            if event['name'] == "measure":
+                measure_timestamps.append(event['timestamp'])
+
+        if len(measure_timestamps) < 2:
+            return 0x100
+
+        return measure_timestamps[-1] - measure_timestamps[-2]
+
+
+    def create_final_sq3_chart(params, charts_data):
+        # Create actual SQ3 data
+        archive_size = 0x20 + (0x10 * len(charts_data)) + sum([len(x['data']) for x in charts_data])
+
+        output_data = bytearray(0x20)
+        output_data[0x00:0x04] = b'SEQP'
+        output_data[0x04] = 0x01
+        output_data[0x06] = 0x01
+        output_data[0x0a] = 0x03
+        output_data[0x0c:0x10] = struct.pack("<I", archive_size)
+        output_data[0x10:0x14] = struct.pack("<I", 0x20)  # Size of header
+        output_data[0x14:0x18] = struct.pack("<I", params['musicid'])
+        output_data[0x18:0x1c] = struct.pack("<I", len(charts_data))
+        output_data[0x1c:0x20] = struct.pack("<I", 0x12345678)
+
+        output_data = bytearray(output_data)
+        for chart_data in charts_data:
+            data = chart_data['data']
+
+            sq3t_data = bytearray(0x20)
+            sq3t_data[0x00:0x04] = b'SQ3T'
+            sq3t_data[0x06] = 0x03  # SQ3 flag
+            sq3t_data[0x0a] = 0x03  # SQ3 flag 2?
+            sq3t_data[0x0c:0x10] = struct.pack("<I", 0x20)  # Size of header
+            event_data = []
+            sq3t_data[0x10:0x14] = struct.pack("<I", len(event_data))  # Number of events
+            sq3t_data[0x14] = chart_data['header']['unk_sys'] & 0xff
+            sq3t_data[0x15] = chart_data['header']['is_metadata'] & 0xff
+            sq3t_data[0x16] = chart_data['header']['difficulty'] & 0xff
+            sq3t_data[0x17] = chart_data['header']['game_type'] & 0xff
+            sq3t_data[0x18:0x1a] = struct.pack("<H", chart_data['header']['time_division'])
+            sq3t_data[0x1a:0x1c] = struct.pack("<H", chart_data['header']['beat_division'])
+            sq3t_data[0x1c:0x20] = struct.pack("<I", 0x40)  # Size of each entry
+
+            if chart_data['header']['is_metadata']:
+                chart_data[0x15] = 0x01
+                output_data[0x16] = 0x01
+
+            file_header = [0] * 0x10
+            file_header[0x00:0x04] = struct.pack("<I", len(data) + 0x10)
+            file_header[0x04] = 0x10
+
+            sq3t_data += bytearray(file_header)
+            sq3t_data += data
+            output_data += sq3t_data
+
+        return output_data
+
+
+    def generate_metadata_chart(chart):
+        output = bytearray()
+
+        if not contains_command(chart['beat_data'], 'startpos'):
+            output += build_command({
+                'name': 'startpos',
+                'timestamp': 0,
+                'timestamp_ms': 0,
+                'data': {},
+            }, 0)
+
+        if not contains_command(chart['beat_data'], 'baron'):
+            output += build_command({
+                'name': 'baron',
+                'timestamp': 0,
+                'timestamp_ms': 0,
+                'data': {},
+            }, 0)
+
+        for event in sorted(chart['beat_data'], key=lambda x:x['timestamp']):
+            if event['name'] not in EVENT_ID_REVERSE:
+                print("Couldn't find %s in EVENT_ID_REVERSE" % event['name'])
+                exit(1)
+
+            if event['name'] not in VALID_METACOMMANDS:
+                continue
+
+            output += build_command(event, chart['header']['game_type'])
+
+        last_measure_duration = calculate_last_measure_duration(chart['beat_data'])
+        last_event = sorted(chart['beat_data'], key=lambda x:x['timestamp'])[-1]
+        last_timestamp = last_event['timestamp'] + last_measure_duration
+
+        if not contains_command(chart['beat_data'], 'baroff'):
+            output += build_command({
+                'name': 'baroff',
+                'timestamp': last_timestamp,
+                'timestamp_ms': last_timestamp / 300,
+                'data': {},
+            }, 0)
+
+        if not contains_command(chart['beat_data'], 'endpos'):
+            output += build_command({
+                'name': 'endpos',
+                'timestamp': last_timestamp,
+                'timestamp_ms': last_timestamp,
+                'data': {},
+            }, 0)
+
+        return output
+
+
+    def generate_chart(chart):
+        output = bytearray()
+
+        if not contains_command(chart['beat_data'], 'chipstart'):
+            output += build_command({
+                'name': 'startpos',
+                'timestamp': 0,
+                'timestamp_ms': 0,
+                'data': {},
+            }, 0)
+
+        for event in sorted(chart['beat_data'], key=lambda x:x['timestamp']):
+            if event['name'] not in EVENT_ID_REVERSE:
+                print("Couldn't find %s in EVENT_ID_REVERSE" % event['name'])
+                exit(1)
+
+            if event['name'] in VALID_METACOMMANDS:
+                continue
+
+            output += build_command(event, chart['header']['game_type'])
+
+        last_measure_duration = calculate_last_measure_duration(chart['beat_data'])
+        last_event = sorted(chart['beat_data'], key=lambda x:x['timestamp'])[-1]
+        last_timestamp = last_event['timestamp'] + last_measure_duration
+
+        if not contains_command(chart['beat_data'], 'chipend'):
+            output += build_command({
+                'name': 'endpos',
+                'timestamp': last_timestamp,
+                'timestamp_ms': last_timestamp,
+                'data': {},
+            }, 0)
+
+        return output
+
+
+    json_sq3 = json.loads(params['input']) if 'input' in params else None
+
+    if not json_sq3:
+        print("Couldn't find input data")
+        return
+
+    chart_metadata = [x for x in json_sq3['charts'] if x['header']['is_metadata'] == 1]
+    charts = [x for x in json_sq3['charts'] if x['header']['is_metadata'] != 1]
+
+    if not chart_metadata:
+        chart_metadata.append(json_sq3['charts'][0])
+
+    parts = ["drum", "guitar", "bass", "open", "guitar1", "guitar2"]
+    found_parts = []
+    parsed_charts = []
+    for valid_parts in [['drum'], ['guitar', 'bass', 'open', 'guitar1', 'guitar2']]:
+        metadata_chart = generate_metadata_chart(chart_metadata[0])
+
+        # Step 2: Generate note charts from input charts
+        filtered_charts = [
+            x for x in json_sq3['charts']
+            if x['header']['is_metadata'] == 0
+            and x['header']['game_type'] < len(parts)
+            and parts[x['header']['game_type']] in valid_parts
+        ]
+
+        if not filtered_charts:
+            continue
+
+        found_parts += [parts[x['header']['game_type']] for x in json_sq3['charts'] if x['header']['is_metadata'] == 0]
+
+        parsed_charts.append({
+            'data': metadata_chart,
+            'header': chart_metadata[0]['header']
+        })
+
+        for chart in filtered_charts:
+            parsed_charts.append({
+                'data': generate_chart(chart),
+                'header': chart['header']
+            })
+
+    output_data = create_final_sq3_chart(params, parsed_charts)
+
+    import hexdump
+    hexdump.hexdump(output_data[:0x100])
+    exit(1)
+
+
+
 
 def read_sq3_data(data, events, other_params):
     def parse_event_block(mdata, game, events={}):
         packet_data = {}
 
-        timestamp = struct.unpack("<I", mdata[0x00:0x04])[0]
-        beat = struct.unpack("<I", mdata[0x10:0x14])[0]
+        timestamp = struct.unpack("<I", output[0x00:0x04])[0]
+        beat = struct.unpack("<I", output[0x10:0x14])[0]
         game_type_id = {"drum": 0, "guitar": 1, "bass": 2}[game]
 
-        if mdata[0x04] == 0x01:
-            bpm_mpm = struct.unpack("<I", mdata[0x34:0x38])[0]
+        if output[0x04] == 0x01:
+            bpm_mpm = struct.unpack("<I", output[0x34:0x38])[0]
             packet_data['bpm'] = 60000000 / bpm_mpm
             # print(timestamp, packet_data)
-        elif mdata[0x04] == 0x02:
+        elif output[0x04] == 0x02:
             # Time signature is represented as numerator/(1<<denominator)
-            packet_data['numerator'] = mdata[0x34]
-            packet_data['denominator'] = 1 << mdata[0x35]
-            packet_data['denominator_orig'] = mdata[0x35]
+            packet_data['numerator'] = output[0x34]
+            packet_data['denominator'] = 1 << output[0x35]
+            packet_data['denominator_orig'] = output[0x35]
 
             # print(timestamp, packet_data)
-        elif mdata[0x04] == 0x07:
-            packet_data['unk'] = struct.unpack("<I", mdata[0x14:0x18])[0]  # What is this?
-        elif mdata[0x04] == 0x10:
-            packet_data['hold_duration'] = struct.unpack("<I", mdata[0x08:0x0c])[0]
-            packet_data['unk'] = struct.unpack("<I", mdata[0x14:0x18])[0]  # What is this?
-            packet_data['sound_id'] = struct.unpack("<I", mdata[0x20:0x24])[0]
+        elif output[0x04] == 0x07:
+            packet_data['unk'] = struct.unpack("<I", output[0x14:0x18])[0]  # What is this?
+        elif output[0x04] == 0x10:
+            packet_data['hold_duration'] = struct.unpack("<I", output[0x08:0x0c])[0]
+            packet_data['unk'] = struct.unpack("<I", output[0x14:0x18])[0]  # What is this?
+            packet_data['sound_id'] = struct.unpack("<I", output[0x20:0x24])[0]
 
             # Note length (relation to hold duration)
-            packet_data['note_length'] = struct.unpack("<I", mdata[0x24:0x28])[0]
+            packet_data['note_length'] = struct.unpack("<I", output[0x24:0x28])[0]
 
-            packet_data['volume'] = mdata[0x2d]
-            packet_data['auto_volume'] = mdata[0x2e]
-            packet_data['note'] = NOTE_MAPPING[game][mdata[0x30]]
+            packet_data['volume'] = output[0x2d]
+            packet_data['auto_volume'] = output[0x2e]
+            packet_data['note'] = NOTE_MAPPING[game][output[0x30]]
 
             # wail direction? 0/1 = up, 2 = down. Seems to alternate 0 and 1 if wailing in succession
-            packet_data['wail_misc'] = mdata[0x31]
+            packet_data['wail_misc'] = output[0x31]
 
             # 2 = hold note, 1 = wail (bitmasks, so 3 = wail + hold)
-            packet_data['guitar_special'] = mdata[0x32]
+            packet_data['guitar_special'] = output[0x32]
 
             # Auto note
-            packet_data['auto_note'] = mdata[0x34]
+            packet_data['auto_note'] = output[0x34]
 
             if packet_data['auto_note'] == 1:
                 packet_data['note'] = "auto"
@@ -260,11 +544,11 @@ def read_sq3_data(data, events, other_params):
                     if is_gametype and is_eventtype and is_note:
                         packet_data['bonus_note'] = True
 
-        timestamp = struct.unpack("<I", mdata[0x00:0x04])[0]
+        timestamp = struct.unpack("<I", output[0x00:0x04])[0]
 
         return {
-            "id": mdata[0x04],
-            "name": EVENT_ID_MAP[mdata[0x04]],
+            "id": output[0x04],
+            "name": EVENT_ID_MAP[output[0x04]],
             'timestamp': timestamp,
             'timestamp_ms': timestamp / 300,
             'beat': beat,
@@ -352,7 +636,7 @@ class Sq3Format:
 
     @staticmethod
     def to_chart(params):
-        raise NotImplementedError()
+        return generate_sq3_from_json(params)
 
     @staticmethod
     def is_format(filename):

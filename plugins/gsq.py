@@ -88,7 +88,7 @@ REVERSE_NOTE_MAPPING = {
 }
 
 
-def generate_json_from_data(params, read_data_callback):\
+def generate_json_from_data(params, read_data_callback):
     def get_data(params, part_type, difficulty, is_metadata):
         part = ["drum", "guitar", "bass", "open", "guitar1", "guitar2"][part_type]
         diff = ["nov", "bsc", "adv", "ext", "mst"][difficulty]
