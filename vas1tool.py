@@ -59,7 +59,7 @@ def read_vas3(input_filename, output_folder, force_hex=False, mix_audio=False, i
 
         offset += ((entry_count * 0x0c) * 2) + 4
 
-        entries.append((offset, filesize, sound_id))
+        entries.append((offset, filesize, i))
 
     entries.append(len(data))
 

@@ -1,4 +1,7 @@
 import copy
+import os
+
+import audio
 
 def generate_json_from_data(params, read_data_callback, raw_charts):
     def combine_metadata_with_chart(metadata, chart):
@@ -92,16 +95,13 @@ def generate_json_from_data(params, read_data_callback, raw_charts):
 
     def add_note_durations(chart, params):
         def get_duration_from_file(sound_metadata, entry):
-            if 'duration' in entry and entry['duration'] != 0:
+            if 'duration' in entry and entry['duration'] != 0 and entry['duration'] != 0.0:
                 return entry['duration']
 
             filename = entry['filename']
 
             if 'NoFilename' in entry['flags']:
                 filename = "%04x.wav" % entry['sound_id']
-
-            print(entry)
-            exit(1)
 
             return audio.get_duration(os.path.join(params['sound_folder'], filename))
 
@@ -116,8 +116,8 @@ def generate_json_from_data(params, read_data_callback, raw_charts):
 
         for event in chart['beat_data']:
             if event['name'] in ['note', 'auto'] and 'note_length' not in event['data']:
-                event['data']['note_length'] = int(round(duration_lookup.get(event['data']['sound_id'], 0) * 300))
-                print("Calculating note duration", event['data']['note_length'], event['data']['sound_id'], event['data']['sound_id']in duration_lookup)
+                x = duration_lookup.get(event['data']['sound_id'], 0) * 300
+                event['data']['note_length'] = int(round(x))
 
         return chart
 
