@@ -27,6 +27,7 @@ def read_gsq1_data(data, events, other_params):
             if (cmd & 0x40) != 0:
                 packet_data['note'] = NOTE_MAPPING[game][0x10] # open note
                 packet_data['auto_unk'] = param3
+
             else:
                 packet_data['note'] = NOTE_MAPPING[game][param3 & 0x0f] # note
 
@@ -48,6 +49,11 @@ def read_gsq1_data(data, events, other_params):
             'timestamp_ms': timestamp / 300,
             "data": packet_data
         }
+
+    part = [None, "guitar", "bass", "open", "guitar", "guitar"][other_params['game_type']]
+
+    if not part:
+        return None
 
     output = {
         "beat_data": []
@@ -71,7 +77,6 @@ def read_gsq1_data(data, events, other_params):
 
     for i in range(entry_count):
         mdata = data[header_size + (i * entry_size):header_size + (i * entry_size) + entry_size]
-        part = ["drum", "guitar", "bass", "open", "guitar", "guitar"][other_params['game_type']]
         parsed_data = parse_event_block(mdata, part)
 
         if parsed_data:

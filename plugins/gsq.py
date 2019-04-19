@@ -101,34 +101,35 @@ def generate_json_from_data(params, read_data_callback):
 
     raw_charts = [
         # Drum
-        get_data(params, 0, 1, False),
-        get_data(params, 0, 2, False),
+        get_data(params, 0, 4, False),
         get_data(params, 0, 3, False),
+        get_data(params, 0, 2, False),
+        get_data(params, 0, 1, False),
 
         # Guitar
-        get_data(params, 1, 1, False),
-        get_data(params, 1, 2, False),
         get_data(params, 1, 3, False),
+        get_data(params, 1, 2, False),
+        get_data(params, 1, 1, False),
 
         # Bass
-        get_data(params, 2, 1, False),
-        get_data(params, 2, 2, False),
         get_data(params, 2, 3, False),
+        get_data(params, 2, 2, False),
+        get_data(params, 2, 1, False),
 
         # Open
-        get_data(params, 3, 1, False),
-        get_data(params, 3, 2, False),
         get_data(params, 3, 3, False),
+        get_data(params, 3, 2, False),
+        get_data(params, 3, 1, False),
 
         # Guitar 1
-        get_data(params, 4, 1, False),
-        get_data(params, 4, 2, False),
         get_data(params, 4, 3, False),
+        get_data(params, 4, 2, False),
+        get_data(params, 4, 1, False),
 
         # Guitar 2
-        get_data(params, 5, 1, False),
-        get_data(params, 5, 2, False),
         get_data(params, 5, 3, False),
+        get_data(params, 5, 2, False),
+        get_data(params, 5, 1, False),
     ]
     raw_charts = [x for x in raw_charts if x is not None]
 

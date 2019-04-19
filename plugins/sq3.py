@@ -1,4 +1,6 @@
+import copy
 import json
+import os
 import struct
 
 from plugins.sq import generate_json_from_data
@@ -203,13 +205,25 @@ REVERSE_NOTE_MAPPING = {
     "b_rgbyp": 0x1f,
 }
 
+beat_by_timestamp = {}
+last_beat = 0
+
 def generate_sq3_from_json(params):
+
     def build_command(event, game_type):
         output = bytearray(0x40)
 
+        global last_beat, beat_by_timestamp
+        if event['timestamp'] not in beat_by_timestamp:
+            beat_by_timestamp[event['timestamp']] = last_beat
+            last_beat += 480
+
+        else:
+            last_beat = beat_by_timestamp[event['timestamp']]
+
         output[0x00:0x04] = struct.pack("<I", event['timestamp'])
         output[0x04] = EVENT_ID_REVERSE[event['name']] & 0xff
-        # output[0x10:0x14] = struct.pack("<I", event['beat'])
+        output[0x10:0x14] = struct.pack("<I", beat_by_timestamp[event['timestamp']])
 
         if event['name'] == "bpm":
             output[0x34:0x38] = struct.pack("<I", int(round(60000000 / event['data']['bpm'])))
@@ -227,6 +241,9 @@ def generate_sq3_from_json(params):
         elif event['name'] == "chipstart":
             if 'unk' in event['data']:
                 output[0x14:0x18] = struct.pack("<I", event['data']['unk'])
+
+            else:
+                output[0x14:0x18] = struct.pack("<I", 0x16c)
 
         elif event['name'] == "note":
             if event['data']['note'] not in REVERSE_NOTE_MAPPING:
@@ -300,7 +317,7 @@ def generate_sq3_from_json(params):
 
     def create_final_sq3_chart(params, charts_data):
         # Create actual SQ3 data
-        archive_size = 0x20 + (0x10 * len(charts_data)) + sum([len(x['data']) for x in charts_data])
+        archive_size = 0x20 + (0x30 * len(charts_data)) + sum([len(x['data']) for x in charts_data])
 
         output_data = bytearray(0x20)
         output_data[0x00:0x04] = b'SEQP'
@@ -322,8 +339,7 @@ def generate_sq3_from_json(params):
             sq3t_data[0x06] = 0x03  # SQ3 flag
             sq3t_data[0x0a] = 0x03  # SQ3 flag 2?
             sq3t_data[0x0c:0x10] = struct.pack("<I", 0x20)  # Size of header
-            event_data = []
-            sq3t_data[0x10:0x14] = struct.pack("<I", len(event_data))  # Number of events
+            sq3t_data[0x10:0x14] = struct.pack("<I", len(data) // 0x40)  # Number of events
             sq3t_data[0x14] = chart_data['header']['unk_sys'] & 0xff
             sq3t_data[0x15] = chart_data['header']['is_metadata'] & 0xff
             sq3t_data[0x16] = chart_data['header']['difficulty'] & 0xff
@@ -332,17 +348,17 @@ def generate_sq3_from_json(params):
             sq3t_data[0x1a:0x1c] = struct.pack("<H", chart_data['header']['beat_division'])
             sq3t_data[0x1c:0x20] = struct.pack("<I", 0x40)  # Size of each entry
 
-            if chart_data['header']['is_metadata']:
-                chart_data[0x15] = 0x01
-                output_data[0x16] = 0x01
+            if chart_data['header']['is_metadata'] != 0:
+                sq3t_data[0x15] = 0x01
+                sq3t_data[0x16] = 0x01
 
-            file_header = [0] * 0x10
-            file_header[0x00:0x04] = struct.pack("<I", len(data) + 0x10)
+            file_header = bytearray(0x10)
+            file_header[0x00:0x04] = struct.pack("<I", len(data) + 0x30)
             file_header[0x04] = 0x10
 
-            sq3t_data += bytearray(file_header)
-            sq3t_data += data
+            output_data += file_header
             output_data += sq3t_data
+            output_data += data
 
         return output_data
 
@@ -350,12 +366,36 @@ def generate_sq3_from_json(params):
     def generate_metadata_chart(chart):
         output = bytearray()
 
+        global last_beat, beat_by_timestamp
+        last_beat = 0
+
         if not contains_command(chart['beat_data'], 'startpos'):
             output += build_command({
                 'name': 'startpos',
                 'timestamp': 0,
                 'timestamp_ms': 0,
                 'data': {},
+            }, 0)
+
+        if not contains_command(chart['beat_data'], 'bpm'):
+            output += build_command({
+                'name': 'bpm',
+                'timestamp': 0,
+                'timestamp_ms': 0,
+                'data': {
+                    'bpm': 120,
+                },
+            }, 0)
+
+        if not contains_command(chart['beat_data'], 'barinfo'):
+            output += build_command({
+                'name': 'barinfo',
+                'timestamp': 0,
+                'timestamp_ms': 0,
+                'data': {
+                    'numerator': 4,
+                    'denominator': 4,
+                },
             }, 0)
 
         if not contains_command(chart['beat_data'], 'baron'):
@@ -380,14 +420,6 @@ def generate_sq3_from_json(params):
         last_event = sorted(chart['beat_data'], key=lambda x:x['timestamp'])[-1]
         last_timestamp = last_event['timestamp'] + last_measure_duration
 
-        if not contains_command(chart['beat_data'], 'baroff'):
-            output += build_command({
-                'name': 'baroff',
-                'timestamp': last_timestamp,
-                'timestamp_ms': last_timestamp / 300,
-                'data': {},
-            }, 0)
-
         if not contains_command(chart['beat_data'], 'endpos'):
             output += build_command({
                 'name': 'endpos',
@@ -402,9 +434,17 @@ def generate_sq3_from_json(params):
     def generate_chart(chart):
         output = bytearray()
 
-        if not contains_command(chart['beat_data'], 'chipstart'):
+        if not contains_command(chart['beat_data'], 'startpos'):
             output += build_command({
                 'name': 'startpos',
+                'timestamp': 0,
+                'timestamp_ms': 0,
+                'data': {},
+            }, 0)
+
+        if not contains_command(chart['beat_data'], 'chipstart'):
+            output += build_command({
+                'name': 'chipstart',
                 'timestamp': 0,
                 'timestamp_ms': 0,
                 'data': {},
@@ -426,6 +466,14 @@ def generate_sq3_from_json(params):
 
         if not contains_command(chart['beat_data'], 'chipend'):
             output += build_command({
+                'name': 'chipend',
+                'timestamp': last_timestamp,
+                'timestamp_ms': last_timestamp,
+                'data': {},
+            }, 0)
+
+        if not contains_command(chart['beat_data'], 'endpos'):
+            output += build_command({
                 'name': 'endpos',
                 'timestamp': last_timestamp,
                 'timestamp_ms': last_timestamp,
@@ -445,13 +493,16 @@ def generate_sq3_from_json(params):
     charts = [x for x in json_sq3['charts'] if x['header']['is_metadata'] != 1]
 
     if not chart_metadata:
-        chart_metadata.append(json_sq3['charts'][0])
+        chart_metadata = copy.deepcopy(json_sq3['charts'][0])
+
+    else:
+        chart_metadata = chart_metadata[0]
 
     parts = ["drum", "guitar", "bass", "open", "guitar1", "guitar2"]
     found_parts = []
     parsed_charts = []
     for valid_parts in [['drum'], ['guitar', 'bass', 'open', 'guitar1', 'guitar2']]:
-        metadata_chart = generate_metadata_chart(chart_metadata[0])
+        metadata_chart = generate_metadata_chart(chart_metadata)
 
         # Step 2: Generate note charts from input charts
         filtered_charts = [
@@ -466,9 +517,10 @@ def generate_sq3_from_json(params):
 
         found_parts += [parts[x['header']['game_type']] for x in json_sq3['charts'] if x['header']['is_metadata'] == 0]
 
+        chart_metadata['header']['is_metadata'] = 1
         parsed_charts.append({
             'data': metadata_chart,
-            'header': chart_metadata[0]['header']
+            'header': chart_metadata['header']
         })
 
         for chart in filtered_charts:
@@ -477,17 +529,17 @@ def generate_sq3_from_json(params):
                 'header': chart['header']
             })
 
-    output_data = create_final_sq3_chart(params, parsed_charts)
+        output_data = create_final_sq3_chart(params, parsed_charts)
 
-    import hexdump
-    hexdump.hexdump(output_data[:0x100])
-    exit(1)
+        output_filename = "%s%04d.sq3" % ('d' if 'drum' in valid_parts else 'g', params['musicid'])
+        with open(os.path.join(params['output'], output_filename), "wb") as outfile:
+            outfile.write(output_data)
 
-
+    print(found_parts)
 
 
 def read_sq3_data(data, events, other_params):
-    def parse_event_block(mdata, game, events={}):
+    def parse_event_block(output, game, events={}):
         packet_data = {}
 
         timestamp = struct.unpack("<I", output[0x00:0x04])[0]
@@ -563,7 +615,7 @@ def read_sq3_data(data, events, other_params):
         return None
 
     magic = data[0:4]
-    if magic != bytearray("SQ3T", encoding="ascii"):
+    if magic != b"SQ3T":
         print("Not a valid SQ3 file")
         exit(-1)
 
@@ -602,7 +654,7 @@ def generate_json_from_sq3(params):
         return
 
     magic = data[0:4]
-    if magic != bytearray("SEQP", encoding="ascii"):
+    if magic != b"SEQP":
         print("Not a valid SEQ3 file")
         exit(-1)
 
@@ -636,7 +688,7 @@ class Sq3Format:
 
     @staticmethod
     def to_chart(params):
-        return generate_sq3_from_json(params)
+        generate_sq3_from_json(params)
 
     @staticmethod
     def is_format(filename):

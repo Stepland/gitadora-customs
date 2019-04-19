@@ -29,6 +29,12 @@ def read_dsq2_data(data, events, other_params):
             "data": packet_data
         }
 
+
+    part = [None, "guitar", "bass", "open", "guitar", "guitar"][other_params['game_type']]
+
+    if not part:
+        return None
+
     output = {
         "beat_data": []
     }
@@ -51,7 +57,6 @@ def read_dsq2_data(data, events, other_params):
 
     for i in range(entry_count):
         mdata = data[header_size + (i * entry_size):header_size + (i * entry_size) + entry_size]
-        part = ["drum", "guitar", "bass", "open"][other_params['game_type']]
         parsed_data = parse_event_block(mdata, part)
 
         if parsed_data:
