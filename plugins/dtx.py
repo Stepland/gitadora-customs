@@ -174,7 +174,511 @@ def convert_base36(val, padding):
 
 
 def create_json_from_dtx(params):
-    pass
+    def expand_measure(measure, division=192):
+        split = [int(measure[i:i+2], 36) for i in range(0, len(measure), 2)]
+
+        output = []
+        for i in range(len(split)):
+            output.append(split[i])
+            output += [0] * ((division // (len(measure) // 2)) - 1)
+
+        return output
+
+
+    def generate_timestamps(parsed_lines, cur_bpm, bpm_list, division=192):
+        timestamp_by_beat = {}
+        cur_timestamp_step = 0.0
+        cur_timestamp = 0.0
+        for i in range(0, sorted(parsed_lines.keys())[-1] + 1):
+            for j in range(0, division):
+                if i not in timestamp_by_beat:
+                    timestamp_by_beat[i] = {}
+
+                timestamp_by_beat[i][j] = {
+                    'timestamp': int(round(cur_timestamp * 300)),
+                    'timestamp_ms': cur_timestamp
+                }
+
+                cur_timestamp += cur_timestamp_step
+
+                if i in parsed_lines and 0x08 in parsed_lines[i] and parsed_lines[i][0x08][j] != 0:
+                    cur_bpm = bpm_list[parsed_lines[i][0x08][j]]
+                    cur_timestamp_step = (4 * (60 / cur_bpm)) / division
+
+        return timestamp_by_beat
+
+
+    def parse_dtx_to_intermediate(filename, params, sound_metadata, part, division=192):
+        json_events = []
+
+        if not filename or not os.path.exists(filename):
+            return None, None, None, None, sound_metadata
+
+        try:
+            with open(filename, "r", encoding="shift-jis") as f:
+                lines = [x.strip() for x in f if x.strip().startswith("#")]
+        except:
+            try:
+                with open(filename, "r", encoding="utf-8") as f:
+                    lines = [x.strip() for x in f if x.strip().startswith("#")]
+            except:
+                with open(filename, "r", encoding="utf-16") as f:
+                    lines = [x.strip() for x in f if x.strip().startswith("#")]
+
+        parsed_lines = {}
+        bpm_list = {}
+        wav_list = {}
+        cur_bpm = None
+
+        for line in lines:
+            event_str = line[1:]
+            event_str = event_str[:min(event_str.index(':' if ':' in event_str else ' '), event_str.index(' '))]
+            event_data = line[1 + len(event_str) + 1:].strip()
+
+            if event_str == "TITLE":
+                pass
+
+            elif event_str == "ARTIST":
+                pass
+
+            elif event_str == "DLEVEL":
+                pass
+
+            elif event_str == "GLEVEL":
+                pass
+
+            elif event_str == "BLEVEL":
+                pass
+
+            elif event_str == "COMMENT":
+                pass
+
+            elif event_str.startswith("BPM"):
+                if event_str == "BPM":
+                    cur_bpm = float(event_data)
+                    continue
+
+                bpm_id = int(event_str[3:], 36)
+                bpm_list[bpm_id] = float(event_data)
+
+            elif event_str.startswith("WAV"):
+                wav_id = int(event_str[3:], 36)
+                wav_list[wav_id] = event_data
+
+            else:
+                measure_id = int(line[1:4])
+                event_id = int(line[4:6], 16)
+
+                # TODO: Add support for time signature command, and automatically generate measure and beat lines based on that when
+
+                measure = expand_measure(event_data, division)
+
+                if measure_id not in parsed_lines:
+                    parsed_lines[measure_id] = {}
+
+                parsed_lines[measure_id][event_id] = measure
+
+                if event_id in reverse_dtx_mapping:
+                    # print(reverse_dtx_mapping[event_id])
+                    pass
+
+                elif event_id == 0x01:
+                    # BGM
+                    pass
+
+                elif event_id == 0xc2:
+                    # End position
+                    pass
+
+                elif event_id == 0x08:
+                    # BPM
+                    pass
+
+                elif event_id == 0x50:
+                    # Show measure bar
+                    pass
+
+                elif event_id == 0x51:
+                    # Show beat bar
+                    pass
+
+                elif event_id in [0x4c, 0x4d, 0x4e, 0x4f]:
+                    # Bonus notes
+                    pass
+
+                elif event_id in auto_play_ranges:
+                    # Auto note
+                    pass
+
+                else:
+                    print("Unknown event id %02x" % event_id)
+                    exit(1)
+
+        timestamp_by_beat = generate_timestamps(parsed_lines, cur_bpm, bpm_list, division)
+
+        # Generate JSON using the timestamps generated
+        base_chart = []
+        drum_chart = []
+        guitar_chart = []
+        bass_chart = []
+
+        for measure_id in parsed_lines:
+            for event_id in parsed_lines[measure_id]:
+                for beat_id, val in enumerate(parsed_lines[measure_id][event_id]):
+                    timestamp = timestamp_by_beat[measure_id][beat_id]
+
+                    if val == 0:
+                        continue
+
+                    if event_id in reverse_dtx_mapping:
+                        if event_id in drum_range:
+                            target_chart = drum_chart
+
+                        elif event_id in guitar_range:
+                            target_chart = guitar_chart
+
+                        elif event_id in bass_range:
+                            target_chart = bass_chart
+
+                        target_chart.append({
+                            'name': "note",
+                            'timestamp': timestamp['timestamp'],
+                            'timestamp_ms': timestamp['timestamp_ms'],
+                            'data': {
+                                'sound_id': val,
+                                'note': reverse_dtx_mapping[event_id],
+                                'note_length': 0,
+                                'hold_duration': 0,
+                                'volume': 0,
+                                'auto_volume': 0,
+                                'wail_misc': 0,
+                                'guitar_special': 0,
+                                'auto_note': 0,
+                                'bonus_note': 0,
+                                'unk': 0,
+                            }
+                        })
+
+                    elif event_id == 0x01:
+                        # BGM
+                        pass
+
+                    elif event_id == 0xc2:
+                        # Start/end position
+                        base_chart.append({
+                            'name': "endpos" if val == 1 else "startpos",
+                            'timestamp': timestamp['timestamp'],
+                            'timestamp_ms': timestamp['timestamp_ms'],
+                            'data': {}
+                        })
+
+                    elif event_id == 0x08:
+                        # BPM
+                        base_chart.append({
+                            'name': "bpm",
+                            'timestamp': timestamp['timestamp'],
+                            'timestamp_ms': timestamp['timestamp_ms'],
+                            'data': {
+                                'bpm': bpm_list[val],
+                            }
+                        })
+
+                    elif event_id == 0x50:
+                        # Show measure bar
+                        base_chart.append({
+                            'name': "measure",
+                            'timestamp': timestamp['timestamp'],
+                            'timestamp_ms': timestamp['timestamp_ms'],
+                            'data': {}
+                        })
+
+                    elif event_id == 0x51:
+                        # Show beat bar
+                        base_chart.append({
+                            'name': "bar",
+                            'timestamp': timestamp['timestamp'],
+                            'timestamp_ms': timestamp['timestamp_ms'],
+                            'data': {}
+                        })
+
+                    elif event_id in [0x4c, 0x4d, 0x4e, 0x4f]:
+                        # Bonus notes
+                        pass
+
+                    elif event_id in auto_play_ranges:
+                        # Auto note
+                        base_chart.append({
+                            'name': "note",
+                            'timestamp': timestamp['timestamp'],
+                            'timestamp_ms': timestamp['timestamp_ms'],
+                            'data': {
+                                'sound_id': val,
+                                'note': "auto",
+                                'note_length': 0,
+                                'hold_duration': 0,
+                                'volume': 0,
+                                'auto_volume': 1,
+                                'wail_misc': 0,
+                                'guitar_special': 0,
+                                'auto_note': 1,
+                                'bonus_note': 0,
+                                'unk': 0,
+                            }
+                        })
+
+                    else:
+                        print("Unknown event id %02x" % event_id)
+                        exit(1)
+
+
+        base_chart = {
+            'header': {
+                'difficulty': -1,
+                'is_metadata': 1,
+                'game_type': -1,
+            },
+            'beat_data': sorted(base_chart, key=lambda x:x['timestamp']),
+        }
+
+        drum_chart = {
+            'header': {
+                'difficulty': -1,
+                'is_metadata': 0,
+                'game_type': 0,
+            },
+            'beat_data': sorted(drum_chart, key=lambda x:x['timestamp']),
+        }
+
+        guitar_chart = {
+            'header': {
+                'difficulty': -1,
+                'is_metadata': 0,
+                'game_type': 1,
+            },
+            'beat_data': sorted(guitar_chart, key=lambda x:x['timestamp']),
+        }
+
+        bass_chart = {
+            'header': {
+                'difficulty': -1,
+                'is_metadata': 0,
+                'game_type': 2,
+            },
+            'beat_data': sorted(bass_chart, key=lambda x:x['timestamp']),
+        }
+
+        return base_chart, drum_chart, guitar_chart, bass_chart, sound_metadata
+
+    def get_data(difficulty):
+        output = {
+            'drum': None,
+            'guitar': None,
+            'bass': None,
+            'open': None,
+            'guitar1': None,
+            'guitar2': None
+        }
+
+        if 'input_split' not in params:
+            return output
+
+        for part in ['drum', 'guitar', 'bass', 'open', 'guitar1', 'guitar2']:
+            if part in params['input_split'] and difficulty in params['input_split'][part]:
+                filename = params['input_split'][part][difficulty]
+
+                if filename and os.path.exists(filename):
+                    output[part] = params['input_split'][part][difficulty]
+
+        return output
+
+    novice_data = get_data('nov')
+    basic_data = get_data('bsc')
+    adv_data = get_data('adv')
+    ext_data = get_data('ext')
+    master_data = get_data('mst')
+
+    sound_metadata = {'sound_folder': params['sound_folder'] if 'sound_folder' in params else "", 'preview': "", 'bgm': {}, 'data': {}, 'guitar': [], 'drum': [], 'defaults': {}}
+
+    def get_chart_data(data, sound_metadata, parts):
+        metadatas = []
+
+        chart_drum = None
+        if "drum" in parts and 'drum' in data:
+            metadata1, chart_drum, _, _, sound_metadata = parse_dtx_to_intermediate(data['drum'], params, sound_metadata, "drum")
+            metadatas.append(metadata1)
+
+        chart_guitar = None
+        if "guitar" in parts and 'guitar' in data:
+            metadata2, _, chart_guitar, _, sound_metadata = parse_dtx_to_intermediate(data['guitar'], params, sound_metadata, "guitar")
+            metadatas.append(metadata2)
+
+        chart_bass = None
+        if "bass" in parts and 'bass' in data:
+            metadata3, _,  _, chart_bass, sound_metadata = parse_dtx_to_intermediate(data['bass'], params, sound_metadata, "bass")
+            metadatas.append(metadata3)
+
+        chart_open = None
+        # if "open" in parts and 'open' in data:
+        #     metadata4, chart_bass, sound_metadata = parse_dtx_to_intermediate(data['open'], params, sound_metadata, "open")
+        #     metadatas.append(metadata4)
+
+        chart_guitar1 = None
+        # if "guitar1" in parts and 'guitar1' in data:
+        #     metadata5, chart_bass, sound_metadata = parse_dtx_to_intermediate(data['guitar1'], params, sound_metadata, "guitar1")
+        #     metadatas.append(metadata5)
+
+        chart_guitar2 = None
+        # if "guitar2" in parts and 'guitar2' in data:
+        #     metadata6, chart_bass, sound_metadata = parse_dtx_to_intermediate(data['guitar2'], params, sound_metadata, "guitar2")
+        #     metadatas.append(metadata6)
+
+        metadatas = [x for x in metadatas if x is not None]  # Filter bad metadata charts
+        metadata = None if len(metadatas) == 0 else metadatas[0]
+
+        return metadata, chart_drum, chart_guitar, chart_bass, chart_open, chart_guitar1, chart_guitar2, sound_metadata
+
+    novice_metadata, novice_chart_drum, novice_chart_guitar, novice_chart_bass, novice_chart_open, novice_chart_guitar1, novice_chart_guitar2, sound_metadata = get_chart_data(novice_data, sound_metadata, params['parts'])
+    basic_metadata, basic_chart_drum, basic_chart_guitar, basic_chart_bass, basic_chart_open, basic_chart_guitar1, basic_chart_guitar2, sound_metadata = get_chart_data(basic_data, sound_metadata, params['parts'])
+    adv_metadata, adv_chart_drum, adv_chart_guitar, adv_chart_bass, adv_chart_open, adv_chart_guitar1, adv_chart_guitar2, sound_metadata = get_chart_data(adv_data, sound_metadata, params['parts'])
+    ext_metadata, ext_chart_drum, ext_chart_guitar, ext_chart_bass, ext_chart_open, ext_chart_guitar1, ext_chart_guitar2, sound_metadata = get_chart_data(ext_data, sound_metadata, params['parts'])
+    master_metadata, master_chart_drum, master_chart_guitar, master_chart_bass, master_chart_open, master_chart_guitar1, master_chart_guitar2, sound_metadata = get_chart_data(master_data, sound_metadata, params['parts'])
+
+    # Create sound metadata file
+    # Any notes not in the drums or guitar sound metadata fields should be added to both just in case
+    sound_metadata_guitar = {
+        "type": "GDXH",
+        "version": 2,
+        "gdx_type_unk1": 0,
+        "gdx_volume_flag": 1,
+        "defaults": {
+            "default_snare": 0,
+            "default_hihat": 0,
+            "default_floortom": 65521,
+            "default_leftcymbal": 65520,
+            "default_rightcymbal": 0,
+            "default_leftpedal": 65522,
+            "default_lowtom": 0,
+            "default_hightom": 0,
+            "default_bass": 0
+        },
+        "entries": [],
+    }
+
+    for idx in sound_metadata['guitar']:
+        if idx in sound_metadata['data']:
+            sound_metadata_guitar['entries'].append(sound_metadata['data'][idx])
+
+    for idx in list(set(sound_metadata['data'].keys()).difference(set(sound_metadata['guitar'] + sound_metadata['drum']))):
+        if idx in sound_metadata['data']:
+            sound_metadata_guitar['entries'].append(sound_metadata['data'][idx])
+
+    sound_metadata_drums = {
+        "type": "GDXG",
+        "version": 2,
+        "defaults": {
+            "default_hihat": sound_metadata['defaults']['hihat'] if 'hihat' in sound_metadata['defaults'] else 0,
+            "default_lowtom": sound_metadata['defaults']['lowtom'] if 'lowtom' in sound_metadata['defaults'] else 0,
+            "default_snare": sound_metadata['defaults']['snare'] if 'snare' in sound_metadata['defaults'] else 0,
+            "default_floortom": sound_metadata['defaults']['floortom'] if 'floortom' in sound_metadata['defaults'] else 0,
+            "default_leftpedal": sound_metadata['defaults']['leftpedal'] if 'leftpedal' in sound_metadata['defaults'] else 0,
+            "default_bass": sound_metadata['defaults']['bass'] if 'bass' in sound_metadata['defaults'] else 0,
+            "default_leftcymbal": sound_metadata['defaults']['leftcymbal'] if 'leftcymbal' in sound_metadata['defaults'] else 0,
+            "default_hightom": sound_metadata['defaults']['hightom'] if 'hightom' in sound_metadata['defaults'] else 0,
+            "default_rightcymbal": sound_metadata['defaults']['rightcymbal'] if 'rightcymbal' in sound_metadata['defaults'] else 0,
+        },
+        "gdx_type_unk1": 0,
+        "gdx_volume_flag": 1,
+        "entries": [],
+    }
+
+    for idx in sound_metadata['drum']:
+        if idx in sound_metadata['data']:
+            sound_metadata_drums['entries'].append(sound_metadata['data'][idx])
+
+    for idx in list(set(sound_metadata['data'].keys()).difference(set(sound_metadata['guitar'] + sound_metadata['drum']))):
+        if idx in sound_metadata['data']:
+            sound_metadata_drums['entries'].append(sound_metadata['data'][idx])
+
+    metadata_charts = [x for x in [novice_metadata, basic_metadata, adv_metadata, ext_metadata, master_metadata] if x is not None]
+
+    for chart in metadata_charts:
+        chart['header']['difficulty'] = -1
+        chart['header']['is_metadata'] = 1
+
+    if 'drum' not in params['parts']:
+        novice_chart_drum = None
+        basic_chart_drum = None
+        adv_chart_drum = None
+        ext_chart_drum = None
+        master_chart_drum = None
+
+    if 'guitar' not in params['parts']:
+        novice_chart_guitar = None
+        basic_chart_guitar = None
+        adv_chart_guitar = None
+        ext_chart_guitar = None
+        master_chart_guitar = None
+
+    if 'bass' not in params['parts']:
+        novice_chart_bass = None
+        basic_chart_bass = None
+        adv_chart_bass = None
+        ext_chart_bass = None
+        master_chart_bass = None
+
+    if 'open' not in params['parts']:
+        novice_chart_open = None
+        basic_chart_open = None
+        adv_chart_open = None
+        ext_chart_open = None
+        master_chart_open = None
+
+    if 'guitar1' not in params['parts']:
+        novice_chart_guitar1 = None
+        basic_chart_guitar1 = None
+        adv_chart_guitar1 = None
+        ext_chart_guitar1 = None
+        master_chart_guitar1 = None
+
+    if 'guitar2' not in params['parts']:
+        novice_chart_guitar2 = None
+        basic_chart_guitar2 = None
+        adv_chart_guitar2 = None
+        ext_chart_guitar2 = None
+        master_chart_guitar2 = None
+
+    if 'guitar' not in params['parts'] and 'bass' not in params['parts']:
+        sound_metadata_guitar = None
+
+    def set_chart_difficulty(charts, difficulty):
+        for chart in charts:
+            if chart:
+                chart['header']['difficulty'] = difficulty
+
+    novice_charts = [novice_chart_drum, novice_chart_guitar, novice_chart_bass, novice_chart_open, novice_chart_guitar1, novice_chart_guitar2]
+    basic_charts = [basic_chart_drum, basic_chart_guitar, basic_chart_bass, basic_chart_open, basic_chart_guitar1, basic_chart_guitar2]
+    adv_charts = [adv_chart_drum, adv_chart_guitar, adv_chart_bass, adv_chart_open, adv_chart_guitar1, adv_chart_guitar2]
+    ext_charts = [ext_chart_drum, ext_chart_guitar, ext_chart_bass, ext_chart_open, ext_chart_guitar1, ext_chart_guitar2]
+    master_charts = [master_chart_drum, master_chart_guitar, master_chart_bass, master_chart_open, master_chart_guitar1, master_chart_guitar2]
+
+    set_chart_difficulty(novice_charts, 0)
+    set_chart_difficulty(basic_charts, 1)
+    set_chart_difficulty(adv_charts, 2)
+    set_chart_difficulty(ext_charts, 3)
+    set_chart_difficulty(master_charts, 4)
+
+    output_json = {
+        "musicid": 0 if 'musicid' not in params or not params['musicid'] else params['musicid'],
+        "charts": [x for x in ([metadata_charts[0]] if len(metadata_charts) > 0 else []) + ext_charts + master_charts + adv_charts + basic_charts + novice_charts if x is not None],
+        "sound_metadata": {
+            "guitar": sound_metadata_guitar,
+            "drum": sound_metadata_drums,
+        },
+        "bgm": sound_metadata['bgm'],
+        "preview": sound_metadata['preview'],
+    }
+
+    return json.dumps(output_json, indent=4, sort_keys=True)
 
 
 def create_dtx_from_json(params):
