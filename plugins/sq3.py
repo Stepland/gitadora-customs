@@ -328,12 +328,12 @@ def generate_sq3_from_json(params):
             sq3t_data[0x0a] = 0x03  # SQ3 flag 2?
             sq3t_data[0x0c:0x10] = struct.pack("<I", 0x20)  # Size of header
             sq3t_data[0x10:0x14] = struct.pack("<I", len(data) // 0x40)  # Number of events
-            sq3t_data[0x14] = chart_data['header']['unk_sys'] & 0xff
+            sq3t_data[0x14] = chart_data['header'].get('unk_sys', 0) & 0xff
             sq3t_data[0x15] = chart_data['header']['is_metadata'] & 0xff
             sq3t_data[0x16] = chart_data['header']['difficulty'] & 0xff
             sq3t_data[0x17] = chart_data['header']['game_type'] & 0xff
-            sq3t_data[0x18:0x1a] = struct.pack("<H", chart_data['header']['time_division'])
-            sq3t_data[0x1a:0x1c] = struct.pack("<H", chart_data['header']['beat_division'])
+            sq3t_data[0x18:0x1a] = struct.pack("<H", chart_data['header'].get('time_division', 300))
+            sq3t_data[0x1a:0x1c] = struct.pack("<H", chart_data['header'].get('beat_division', 480))
             sq3t_data[0x1c:0x20] = struct.pack("<I", 0x40)  # Size of each entry
 
             if chart_data['header']['is_metadata'] != 0:

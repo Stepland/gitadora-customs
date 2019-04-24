@@ -174,6 +174,10 @@ def convert_base36(val, padding):
 
 
 def create_json_from_dtx(params):
+    def get_sound_id(filename):
+        # TODO: Do this properly
+        return int(os.path.splitext(os.path.basename(filename))[0], 16)
+
     def expand_measure(measure, division=192):
         split = [int(measure[i:i+2], 36) for i in range(0, len(measure), 2)]
 
@@ -345,7 +349,8 @@ def create_json_from_dtx(params):
                             'timestamp': timestamp['timestamp'],
                             'timestamp_ms': timestamp['timestamp_ms'],
                             'data': {
-                                'sound_id': val,
+                                # TODO: Fix all of these fields
+                                'sound_id': get_sound_id(wav_list[val]),
                                 'note': reverse_dtx_mapping[event_id],
                                 'note_length': 0,
                                 'hold_duration': 0,
@@ -395,7 +400,7 @@ def create_json_from_dtx(params):
                     elif event_id == 0x51:
                         # Show beat bar
                         base_chart.append({
-                            'name': "bar",
+                            'name': "beat",
                             'timestamp': timestamp['timestamp'],
                             'timestamp_ms': timestamp['timestamp_ms'],
                             'data': {}
@@ -403,6 +408,7 @@ def create_json_from_dtx(params):
 
                     elif event_id in [0x4c, 0x4d, 0x4e, 0x4f]:
                         # Bonus notes
+                        # TODO: Add support for bonus notes and event data
                         pass
 
                     elif event_id in auto_play_ranges:
@@ -412,6 +418,7 @@ def create_json_from_dtx(params):
                             'timestamp': timestamp['timestamp'],
                             'timestamp_ms': timestamp['timestamp_ms'],
                             'data': {
+                                # TODO: Add support for all of these
                                 'sound_id': val,
                                 'note': "auto",
                                 'note_length': 0,
@@ -435,7 +442,7 @@ def create_json_from_dtx(params):
             'header': {
                 'difficulty': -1,
                 'is_metadata': 1,
-                'game_type': -1,
+                'game_type': 0,
             },
             'beat_data': sorted(base_chart, key=lambda x:x['timestamp']),
         }
@@ -1093,6 +1100,7 @@ def create_dtx_from_json(params):
 
             outfile.write("#COMMENT %s\n" % json.dumps(comment_json))
 
+            sound_initial = ""
             for k in output_data['sound_ids']:
                 outfile.write("#WAV%s: %s\n" % (convert_base36(k, 2), os.path.join(sound_initial, "%s.wav" % output_data['sound_ids'][k]['filename'])))
 
