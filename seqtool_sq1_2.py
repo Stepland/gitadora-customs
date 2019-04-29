@@ -73,12 +73,12 @@ def main():
             setattr(args, attr_name, filename)
             args.music_id = music_id
 
-    params = {
+    params_drum = {
         "input_format": args.input_format if args.input_format else None,
         "output": args.output,
         "output_format": args.output_format,
         "sound_folder": args.sound_folder,
-        "sound_metadata": seqtool_main.get_sound_metadata(args.sound_folder),
+        "sound_metadata": seqtool_main.get_sound_metadata(args.sound_folder, "drum"),
         "parts": args.parts,
         "difficulty": args.difficulty,
         "musicid": args.music_id,
@@ -88,6 +88,19 @@ def main():
                 "adv": args.input_drum_adv,
                 "ext": args.input_drum_ext,
             },
+        },
+    }
+
+    params_guitar = {
+        "input_format": args.input_format if args.input_format else None,
+        "output": args.output,
+        "output_format": args.output_format,
+        "sound_folder": args.sound_folder,
+        "sound_metadata": seqtool_main.get_sound_metadata(args.sound_folder, "guitar"),
+        "parts": args.parts,
+        "difficulty": args.difficulty,
+        "musicid": args.music_id,
+        "input_split": {
             "guitar": {
                 "bsc": args.input_guitar_bsc,
                 "adv": args.input_guitar_adv,
@@ -104,10 +117,10 @@ def main():
                 "ext": args.input_open_ext,
             },
         },
-        "no_sounds": False,
     }
 
-    seqtool_main.add_task(params)
+    seqtool_main.add_task(params_drum)
+    seqtool_main.add_task(params_guitar)
     seqtool_main.run_tasks()
 
 if __name__ == "__main__":

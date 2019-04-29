@@ -454,7 +454,7 @@ def create_json_from_dtx(params):
                             'timestamp': timestamp['timestamp'],
                             'timestamp_ms': timestamp['timestamp_ms'],
                             'data': {
-                                'sound_id': val,
+                                'sound_id': get_sound_id(wav_list[val]),
                                 'note': note_str,
                                 'note_length': get_sound_length(comment_json, val),
                                 'hold_duration': timestamp_by_beat[hold_timestamps[1][0]][hold_timestamps[1][1]]['timestamp'] - timestamp_by_beat[hold_timestamps[0][0]][hold_timestamps[0][1]]['timestamp'] if hold_timestamps else 0,
@@ -955,6 +955,7 @@ def create_dtx_from_json(params):
                     if sound_key not in sound_id_lookup:
                         sound_id_lookup[sound_key] = cur_sound_id
                         used_sound_ids[cur_sound_id] = {
+                            'sound_id': event['data']['sound_id'],
                             'filename': "%04x" % event['data']['sound_id'],
                             'duration': event['data'].get('note_length', 0)
                         }
@@ -1022,15 +1023,30 @@ def create_dtx_from_json(params):
                 output_data[measure_idx][0x51][beat_idx] = 0x01 if display_bar else 0x00
 
             elif event['name'] == "note":
+                sound_key = "%04d_%03d" % (
+                    event['data']['sound_id'],
+                    event['data']['volume'],
+                )
+
+                if sound_key not in sound_keys:
+                    sound_keys.append(sound_key)
+                    sound_id = sound_keys.index(sound_key)
+                    sound_info[sound_id] = {
+                        'sound_id': event['data']['sound_id'],
+                        'volume': event['data']['volume'],
+                    }
+
+                sound_id = sound_keys.index(sound_key)
+
                 if event['data']['note'] == "auto":
                     for note in auto_play_ranges:
                         if output_data[measure_idx][note][beat_idx] == 0:
                             break
 
-                    output_data[measure_idx][note][beat_idx] = event['data']['sound_id']
+                    output_data[measure_idx][note][beat_idx] = sound_id
 
                 else:
-                    output_data[measure_idx][dtx_mapping[event['data']['note']]][beat_idx] = event['data']['sound_id']
+                    output_data[measure_idx][dtx_mapping[event['data']['note']]][beat_idx] = sound_id
 
                 if 'guitar_special' in event['data'] and event['data']['guitar_special'] & 0x01:
                     if event['data']['wail_misc'] == 2:
@@ -1076,22 +1092,6 @@ def create_dtx_from_json(params):
 
                     if bonus_note_lane < 0x4c:
                         print("Couldn't find enough bonus note lanes")
-
-                sound_key = "%04d_%03d" % (
-                    event['data']['sound_id'],
-                    event['data']['volume'],
-                )
-
-                if sound_key not in sound_keys:
-                    sound_keys.append(sound_key)
-                    sound_id = sound_keys.index(sound_key)
-                    sound_info[sound_id] = {
-                        'sound_id': event['data']['sound_id'],
-                        'volume': event['data']['volume'],
-                    }
-
-
-
 
         for event in events:
             longnote_fields = {
@@ -1184,9 +1184,9 @@ def create_dtx_from_json(params):
         with open(output_filename, "w") as outfile:
             outfile.write("""#TITLE: (no title)
 #ARTIST: (no artist)
-#DLEVEL: 0
-#GLEVEL: 0
-#BLEVEL: 0\n""")
+#DLEVEL: 1
+#GLEVEL: 1
+#BLEVEL: 1\n""")
 
 
             comment_json = {
@@ -1200,27 +1200,16 @@ def create_dtx_from_json(params):
             if comment_json['sound_lengths']:
                 outfile.write("#COMMENT %s\n" % json.dumps(comment_json))
 
-            sound_initial = ""
-
             sound_metadata = params.get('sound_metadata', None)
             for k in sorted(output_data['sound_info'].keys()):
-                wav_filename = "%04x.wav" % output_data['sound_info'][k]['sound_id']
-
-                if sound_metadata and 'entries' in sound_metadata:
-                    for sound_entry in sound_metadata['entries']:
-                        if sound_entry['sound_id'] != output_data['sound_info'][k]['sound_id']:
-                            continue
-
-                        if "NoFilename" not in sound_entry['flags']:
-                            wav_filename = "%s.wav" % sound_entry['filename']
-
-                        break
+                wav_filename = "%s_%04x.wav" % (sound_initial[0], output_data['sound_ids'][output_data['sound_info'][k]['sound_id']]['sound_id'])
 
                 outfile.write("#WAV%s: %s\n" % (base_repr(k, 36, padding=2).upper()[-2:], wav_filename))
                 outfile.write("#VOLUME%s: %d\n" % (base_repr(k, 36, padding=2).upper()[-2:], round((output_data['sound_info'][k]['volume'] / 127) * 100)))
             #     output.append("#PAN%s %d" % (base_repr(int(k), 36, padding=2).upper()[-2:], output_data['sound_info'][k]['pan']))
 
 
+            sound_initial = ""
             outfile.write("""#WAVZZ: %s
 #00001: ZZ
 #000C2: 02\n""" % (os.path.join(sound_initial, bgm_filename)))

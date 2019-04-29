@@ -119,11 +119,20 @@ def process_file(params):
     output_handler.to_chart(params)
 
 
-def get_sound_metadata(sound_folder):
+def get_sound_metadata(sound_folder, game_type=None):
     if not sound_folder:
         return None
 
-    sound_metadata_filename = os.path.join(sound_folder, "metadata.json")
+    if game_type == "drum":
+        metadata_filename = "d_metadata.json"
+
+    elif game_type == "guitar":
+        metadata_filename = "g_metadata.json"
+
+    else:
+        metadata_filename = "metadata.json"
+
+    sound_metadata_filename = os.path.join(sound_folder, metadata_filename)
 
     if os.path.exists(sound_metadata_filename):
         with open(sound_metadata_filename, "r") as f:

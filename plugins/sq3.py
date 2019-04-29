@@ -536,6 +536,9 @@ def generate_sq3_from_json(params):
     chart_metadata = [x for x in json_sq3['charts'] if x['header']['is_metadata'] == 1]
     charts = [x for x in json_sq3['charts'] if x['header']['is_metadata'] != 1]
 
+    if not json_sq3['charts']:
+        return
+
     if not chart_metadata:
         chart_metadata = copy.deepcopy(json_sq3['charts'][0])
 
