@@ -404,7 +404,6 @@ def add_packages_to_mdb(mdb_filename, packages, fresh, unsafe):
         dupe += dupes
 
     mdb = update_entry_orders(mdb)
-
     save_mdb(mdb, mdb_filename)
 
     return list(set(dupes))
@@ -467,6 +466,9 @@ def prepare_graphics_for_package(package):
         jacket_64.save(jacket_64_filename)
         package['graphics']['jacket_small'] = "jacket_64.png"
         tmpfile.add_temp_file(jacket_64_filename)
+
+        jacket_img.close()
+        del jacket_img
 
 
 def patch_sq3(filename, music_id):
@@ -1094,7 +1096,14 @@ if __name__ == "__main__":
     parser.add_argument('-g', '--game-dir', help='Input game directory', default="")
     parser.add_argument('-p', '--packages-dir', help='Input packages directory', default="packages")
     parser.add_argument('-u', '--unsafe', help='Enable unsafe mode', default=False, action='store_true')
+    parser.add_argument('-s', '--sort', help='Sort music database only', default=False, action='store_true')
     args = parser.parse_args()
 
-    patch_game_for_customs(args.game_dir)
-    install_packages(args.game_dir, args.packages_dir, unsafe=args.unsafe)
+    if args.sort:
+        game_data_folder = os.path.join(args.game_dir, "data")
+        add_packages_to_mdb(os.path.join(game_data_folder, "product", "xml", "mdb_xg.xml"), [], False, False)
+        add_packages_to_mdb(os.path.join(game_data_folder, "product", "xml", "mdb_mt.xml"), [], False, False)
+
+    else:
+        patch_game_for_customs(args.game_dir)
+        install_packages(args.game_dir, args.packages_dir, unsafe=args.unsafe)
