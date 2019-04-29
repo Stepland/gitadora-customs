@@ -1,7 +1,11 @@
+import copy
 import json
+import os
 import struct
 
 from plugins.sq import generate_json_from_data
+
+VALID_METACOMMANDS = ['startpos', 'endpos', 'baron', 'baroff', 'measure', 'beat', 'unk0c', 'bpm', 'barinfo']
 
 EVENT_ID_MAP = {
     0x10: "bpm",
@@ -108,6 +112,280 @@ REVERSE_NOTE_MAPPING = {
     "b_xgbxx": 0x06,
     "b_rgbxx": 0x07,
 }
+
+
+def generate_sq2_from_json(params):
+    def build_command(event, game_type):
+        output = bytearray(0x10)
+
+        output[0x00:0x04] = struct.pack("<I", event['timestamp'])
+        output[0x05] = EVENT_ID_REVERSE[event['name']] & 0xff
+
+        if event['name'] == "bpm":
+            if event['data']['bpm'] < 1:
+                event['data']['bpm'] = 1
+
+            elif event['data']['bpm'] > 60000000:
+                event['data']['bpm'] = 60000000
+
+            output[0x08:0x0c] = struct.pack("<I", int(round(60000000 / event['data']['bpm'])))
+
+        elif event['name'] == "barinfo":
+            output[0x0c] = event['data']['numerator'] & 0xff
+
+            denominator = 1 << (event['data']['denominator'].bit_length() - 1)
+            if denominator != event['data']['denominator']:
+                raise Exception("ERROR: The time signature denominator must be divisible by 2."
+                                "Found {}".format(event['data']['denominator']))
+
+            output[0x0d] = (event['data']['denominator'].bit_length() - 1) & 0xff
+
+        elif event['name'] == "note":
+            if event['data']['note'] not in REVERSE_NOTE_MAPPING:
+                # Set all unknown events to auto play
+                REVERSE_NOTE_MAPPING[event['data']['note']] = 0xff
+
+            if 'sound_id' in event['data']:
+                output[0x08:0x0a] = struct.pack("<H", event['data']['sound_id'])
+
+            if 'unk' in event['data']:
+                output[0x0a:0x0c] = struct.pack("<H", event['data']['unk'])
+
+            if 'volume' in event['data']:
+                output[0x0c] = event['data']['volume'] & 0xff
+
+            if 'note' in event['data']:
+                output[0x04] = REVERSE_NOTE_MAPPING[event['data']['note']] & 0xff
+
+            if event['data'].get('note') == "auto":
+                output[0x04] = 0
+                output[0x05] = EVENT_ID_REVERSE["auto"] & 0xff
+
+        elif event['name'] == "auto":
+            output[0x04] = 0
+            output[0x08:0x0a] = struct.pack("<H", event['data'].get('sound_id', 0))
+            output[0x0a:0x0c] = struct.pack("<H", event['data'].get('unk', 0))
+            output[0x0c] = event['data'].get('volume', 0) & 0xff
+
+        return output
+
+
+    def contains_command(chart, command):
+        for event in chart:
+            if event['name'] == command:
+                return True
+
+        return False
+
+
+    def calculate_last_measure_duration(chart):
+        measure_timestamps = []
+
+        for event in chart:
+            if event['name'] == "measure":
+                measure_timestamps.append(event['timestamp'])
+
+        if len(measure_timestamps) < 2:
+            return 0x100
+
+        return measure_timestamps[-1] - measure_timestamps[-2]
+
+
+    def create_final_sq2_chart(params, charts_data):
+        # Create actual sq2 data
+        archive_size = 0x20 + (0x30 * len(charts_data)) + sum([len(x['data']) for x in charts_data])
+
+        output_data = bytearray(0x20)
+        output_data[0x00:0x04] = b'SEQP'
+        output_data[0x06] = 0x02
+        output_data[0x0a] = 0x01
+        output_data[0x0c:0x10] = struct.pack("<I", archive_size)
+        output_data[0x14:0x18] = struct.pack("<I", params['musicid'])
+        output_data[0x18:0x1c] = struct.pack("<I", len(charts_data))
+
+        output_data = bytearray(output_data)
+        for chart_data in charts_data:
+            data = chart_data['data']
+
+            seqt_data = bytearray(0x20)
+            seqt_data[0x00:0x04] = b'SEQT'
+            seqt_data[0x06] = 0x02  # sq2 flag
+            seqt_data[0x0a] = 0x01  # sq2 flag 2?
+            seqt_data[0x0c:0x10] = struct.pack("<I", 0x20)  # Size of header
+            seqt_data[0x10:0x14] = struct.pack("<I", len(data) // 0x10)  # Number of events
+            seqt_data[0x14] = chart_data['header'].get('unk_sys', 0) & 0xff
+            seqt_data[0x15] = chart_data['header']['is_metadata'] & 0xff
+            seqt_data[0x16] = chart_data['header']['difficulty'] & 0xff
+            seqt_data[0x17] = chart_data['header']['game_type'] & 0xff
+
+            if chart_data['header']['is_metadata'] != 0:
+                seqt_data[0x15] = 0x01
+                seqt_data[0x16] = 0x01
+
+            file_header = bytearray(0x10)
+            file_header[0x00:0x04] = struct.pack("<I", len(data) + 0x30)
+            file_header[0x04] = 0x10
+
+            output_data += file_header
+            output_data += seqt_data
+            output_data += data
+
+        return output_data
+
+
+    def generate_metadata_chart(chart):
+        output = bytearray()
+
+        global last_beat, beat_by_timestamp
+        last_beat = 0
+
+        if not contains_command(chart['beat_data'], 'startpos'):
+            output += build_command({
+                'name': 'startpos',
+                'timestamp': 0,
+                'timestamp_ms': 0,
+                'data': {},
+            }, 0)
+
+        if not contains_command(chart['beat_data'], 'baron'):
+            output += build_command({
+                'name': 'baron',
+                'timestamp': 0,
+                'timestamp_ms': 0,
+                'data': {},
+            }, 0)
+
+        for event in sorted(chart['beat_data'], key=lambda x:x['timestamp']):
+            if event['name'] not in EVENT_ID_REVERSE:
+                print("Couldn't find %s in EVENT_ID_REVERSE" % event['name'])
+                exit(1)
+
+            if event['name'] not in VALID_METACOMMANDS:
+                continue
+
+            output += build_command(event, chart['header']['game_type'])
+
+        last_measure_duration = calculate_last_measure_duration(chart['beat_data'])
+        last_event = sorted(chart['beat_data'], key=lambda x:x['timestamp'])[-1]
+        last_timestamp = last_event['timestamp'] + last_measure_duration
+
+        if not contains_command(chart['beat_data'], 'endpos'):
+            output += build_command({
+                'name': 'endpos',
+                'timestamp': last_timestamp,
+                'timestamp_ms': last_timestamp,
+                'data': {},
+            }, 0)
+
+        return output
+
+
+    def generate_chart(chart):
+        output = bytearray()
+
+        if not contains_command(chart['beat_data'], 'startpos'):
+            output += build_command({
+                'name': 'startpos',
+                'timestamp': 0,
+                'timestamp_ms': 0,
+                'data': {},
+            }, 0)
+
+        if not contains_command(chart['beat_data'], 'chipstart'):
+            output += build_command({
+                'name': 'chipstart',
+                'timestamp': 0,
+                'timestamp_ms': 0,
+                'data': {},
+            }, 0)
+
+        for event in sorted(chart['beat_data'], key=lambda x:x['timestamp']):
+            if event['name'] not in EVENT_ID_REVERSE:
+                print("Couldn't find %s in EVENT_ID_REVERSE" % event['name'])
+                exit(1)
+
+            if event['name'] in VALID_METACOMMANDS:
+                continue
+
+            output += build_command(event, chart['header']['game_type'])
+
+        last_measure_duration = calculate_last_measure_duration(chart['beat_data'])
+        last_event = sorted(chart['beat_data'], key=lambda x:x['timestamp'])[-1]
+        last_timestamp = last_event['timestamp'] + last_measure_duration
+
+        if not contains_command(chart['beat_data'], 'chipend'):
+            output += build_command({
+                'name': 'chipend',
+                'timestamp': last_timestamp,
+                'timestamp_ms': last_timestamp,
+                'data': {},
+            }, 0)
+
+        if not contains_command(chart['beat_data'], 'endpos'):
+            output += build_command({
+                'name': 'endpos',
+                'timestamp': last_timestamp,
+                'timestamp_ms': last_timestamp,
+                'data': {},
+            }, 0)
+
+        return output
+
+
+    json_sq2 = json.loads(params['input']) if 'input' in params else None
+
+    if not json_sq2:
+        print("Couldn't find input data")
+        return
+
+    chart_metadata = [x for x in json_sq2['charts'] if x['header']['is_metadata'] == 1]
+    charts = [x for x in json_sq2['charts'] if x['header']['is_metadata'] != 1]
+
+    if not json_sq2['charts']:
+        return
+
+    if not chart_metadata:
+        chart_metadata = copy.deepcopy(json_sq2['charts'][0])
+
+    else:
+        chart_metadata = chart_metadata[0]
+
+    parts = ["drum", "guitar", "bass", "open", "guitar1", "guitar2"]
+    found_parts = []
+    parsed_charts = []
+    for valid_parts in [['drum'], ['guitar', 'bass', 'open', 'guitar1', 'guitar2']]:
+        metadata_chart = generate_metadata_chart(chart_metadata)
+
+        # Step 2: Generate note charts from input charts
+        filtered_charts = [
+            x for x in json_sq2['charts']
+            if x['header']['is_metadata'] == 0
+            and x['header']['game_type'] < len(parts)
+            and parts[x['header']['game_type']] in valid_parts
+        ]
+
+        if not filtered_charts:
+            continue
+
+        found_parts += [parts[x['header']['game_type']] for x in json_sq2['charts'] if x['header']['is_metadata'] == 0]
+
+        chart_metadata['header']['is_metadata'] = 1
+        parsed_charts.append({
+            'data': metadata_chart,
+            'header': chart_metadata['header']
+        })
+
+        for chart in filtered_charts:
+            parsed_charts.append({
+                'data': generate_chart(chart),
+                'header': chart['header']
+            })
+
+        output_data = create_final_sq2_chart(params, parsed_charts)
+
+        output_filename = "%s%04d.sq2" % ('d' if 'drum' in valid_parts else 'g', params['musicid'])
+        with open(os.path.join(params['output'], output_filename), "wb") as outfile:
+            outfile.write(output_data)
 
 
 def read_sq2_data(data, events, other_params):
@@ -258,7 +536,7 @@ class Sq2Format:
 
     @staticmethod
     def to_chart(params):
-        raise NotImplementedError()
+        generate_sq2_from_json(params)
 
     @staticmethod
     def is_format(filename):

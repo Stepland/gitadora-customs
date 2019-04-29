@@ -582,7 +582,6 @@ def generate_sq3_from_json(params):
         with open(os.path.join(params['output'], output_filename), "wb") as outfile:
             outfile.write(output_data)
 
-
         create_event_file(params, filtered_charts)
 
 
