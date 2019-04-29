@@ -206,7 +206,6 @@ REVERSE_NOTE_MAPPING = {
 }
 
 def generate_sq3_from_json(params):
-
     def build_command(event, game_type):
         output = bytearray(0x40)
 

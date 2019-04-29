@@ -25,6 +25,7 @@ dtx_bonus_mapping = {
     "floortom": 0x08,
     "rightcymbal": 0x09,
 }
+reverse_dtx_bonus_mapping = {dtx_bonus_mapping[k]: k for k in dtx_bonus_mapping if k != "auto"}
 
 drum_mapping = {
     "hihat": 0x11,
@@ -174,9 +175,34 @@ def convert_base36(val, padding):
 
 
 def create_json_from_dtx(params):
+    def calculate_hold_duration(holds, measure_id, beat_id):
+        for hold in holds:
+            if hold[0][0] == measure_id and hold[0][1] == beat_id:
+                return hold
+
+        return None
+
+
+    def calculate_wail_flag(wails, measure_id, beat_id):
+        for wail in wails:
+            if wail[0] == measure_id and wail[1] == beat_id:
+                return 2 if wail[2] == 1 else 1
+
+        return None
+
+
+    def is_bonus_note(bonus_notes, measure_id, beat_id, match_note):
+        for bonus in bonus_notes:
+            if bonus[0] == measure_id and bonus[1] == beat_id and bonus[2] == match_note:
+                return 1
+
+        return 0
+
+
     def get_sound_id(filename):
         # TODO: Do this properly
         return int(os.path.splitext(os.path.basename(filename))[0], 16)
+
 
     def expand_measure(measure, division=192):
         split = [int(measure[i:i+2], 36) for i in range(0, len(measure), 2)]
@@ -213,6 +239,12 @@ def create_json_from_dtx(params):
 
 
     def parse_dtx_to_intermediate(filename, params, sound_metadata, part, division=192):
+        def get_sound_length(input_json, sound_id):
+            if input_json and 'sound_lengths' in input_json and sound_id in input_json['sound_lengths']:
+                return input_json['sound_lengths'][sound_id]
+
+            return 0
+
         json_events = []
 
         if not filename or not os.path.exists(filename):
@@ -232,7 +264,14 @@ def create_json_from_dtx(params):
         parsed_lines = {}
         bpm_list = {}
         wav_list = {}
+        volume_list = {}
         cur_bpm = None
+        comment_json = None
+        guitar_holds_list = []
+        bass_holds_list = []
+        guitar_wail_list = []
+        bass_wail_list = []
+        bonus_notes = []
 
         for line in lines:
             event_str = line[1:]
@@ -255,7 +294,7 @@ def create_json_from_dtx(params):
                 pass
 
             elif event_str == "COMMENT":
-                pass
+                comment_json = json.loads(event_data)
 
             elif event_str.startswith("BPM"):
                 if event_str == "BPM":
@@ -268,6 +307,10 @@ def create_json_from_dtx(params):
             elif event_str.startswith("WAV"):
                 wav_id = int(event_str[3:], 36)
                 wav_list[wav_id] = event_data
+
+            elif event_str.startswith("VOLUME"):
+                wav_id = int(event_str[6:], 36)
+                volume_list[wav_id] = int(event_data)
 
             else:
                 measure_id = int(line[1:4])
@@ -308,15 +351,54 @@ def create_json_from_dtx(params):
 
                 elif event_id in [0x4c, 0x4d, 0x4e, 0x4f]:
                     # Bonus notes
-                    pass
+                    for beat_id, val in enumerate(parsed_lines[measure_id][event_id]):
+                        if val != 0 and val in reverse_dtx_bonus_mapping:
+                            bonus_notes.append((measure_id, beat_id, reverse_dtx_bonus_mapping[val]))
 
                 elif event_id in auto_play_ranges:
                     # Auto note
                     pass
 
+                elif event_id == 0x28:
+                    # Guitar Wail
+                    for beat_id, val in enumerate(parsed_lines[measure_id][event_id]):
+                        if val != 0:
+                            guitar_wail_list.append((measure_id, beat_id, val))
+
+                elif event_id == 0xa8:
+                    # Bass Wail
+                    for beat_id, val in enumerate(parsed_lines[measure_id][event_id]):
+                        if val != 0:
+                            bass_wail_list.append((measure_id, beat_id, val))
+
+                elif event_id == 0x2c:
+                    # Guitar long note
+                    for beat_id, val in enumerate(parsed_lines[measure_id][event_id]):
+                        if val != 0:
+                            guitar_holds_list.append((measure_id, beat_id))
+
+
+                elif event_id == 0x2d:
+                    # Bass long note
+                    for beat_id, val in enumerate(parsed_lines[measure_id][event_id]):
+                        if val != 0:
+                            bass_holds_list.append((measure_id, beat_id))
+
                 else:
                     print("Unknown event id %02x" % event_id)
                     exit(1)
+
+        if len(guitar_holds_list) % 2:
+            print("Could not match all guitar long note starts with an end")
+            exit(1)
+
+        guitar_holds_list = [guitar_holds_list[i:i+2] for i in range(0, len(guitar_holds_list), 2)]
+
+        if len(bass_holds_list) % 2:
+            print("Could not match all bass long note starts with an end")
+            exit(1)
+
+        bass_holds_list = [bass_holds_list[i:i+2] for i in range(0, len(bass_holds_list), 2)]
 
         timestamp_by_beat = generate_timestamps(parsed_lines, cur_bpm, bpm_list, division)
 
@@ -335,31 +417,45 @@ def create_json_from_dtx(params):
                         continue
 
                     if event_id in reverse_dtx_mapping:
+                        hold_timestamps = None
+                        wail_misc = None
+
                         if event_id in drum_range:
                             target_chart = drum_chart
 
                         elif event_id in guitar_range:
                             target_chart = guitar_chart
+                            hold_timestamps = calculate_hold_duration(guitar_holds_list, measure_id, beat_id)
+                            wail_misc = calculate_wail_flag(guitar_wail_list, measure_id, beat_id)
 
                         elif event_id in bass_range:
                             target_chart = bass_chart
+                            hold_timestamps = calculate_hold_duration(bass_holds_list, measure_id, beat_id)
+                            wail_misc = calculate_wail_flag(bass_wail_list, measure_id, beat_id)
+
+                        guitar_special = 0
+
+                        if hold_timestamps:
+                            guitar_special |= 2
+
+                        if wail_misc:
+                            guitar_special |= 1
 
                         target_chart.append({
                             'name': "note",
                             'timestamp': timestamp['timestamp'],
                             'timestamp_ms': timestamp['timestamp_ms'],
                             'data': {
-                                # TODO: Fix all of these fields
-                                'sound_id': get_sound_id(wav_list[val]),
+                                'sound_id': val,
                                 'note': reverse_dtx_mapping[event_id],
-                                'note_length': 0,
-                                'hold_duration': 0,
-                                'volume': 0,
-                                'auto_volume': 0,
-                                'wail_misc': 0,
-                                'guitar_special': 0,
+                                'note_length': get_sound_length(comment_json, val),
+                                'hold_duration': timestamp_by_beat[hold_timestamps[1][0]][hold_timestamps[1][1]]['timestamp'] - timestamp_by_beat[hold_timestamps[0][0]][hold_timestamps[0][1]]['timestamp'] if hold_timestamps else 0,
+                                'volume': volume_list[val] if val in volume_list else 127,
+                                'wail_misc': wail_misc if wail_misc else 0,
+                                'guitar_special': guitar_special,
+                                'bonus_note': is_bonus_note(bonus_notes, measure_id, beat_id, reverse_dtx_mapping[event_id]),
                                 'auto_note': 0,
-                                'bonus_note': 0,
+                                'auto_volume': 0,
                                 'unk': 0,
                             }
                         })
@@ -421,7 +517,7 @@ def create_json_from_dtx(params):
                                 # TODO: Add support for all of these
                                 'sound_id': val,
                                 'note': "auto",
-                                'note_length': 0,
+                                'note_length': get_sound_length(comment_json, val),
                                 'hold_duration': 0,
                                 'volume': 0,
                                 'auto_volume': 1,
@@ -432,6 +528,14 @@ def create_json_from_dtx(params):
                                 'unk': 0,
                             }
                         })
+
+                    elif event_id in [0x28]:
+                        # Temporary ignore
+                        print("WARNING: Implement %02x" % event_id)
+
+                    elif event_id in [0x2c, 0x2d]:
+                        # Ignore these, they aren't errors and are intentionally not handled here
+                        pass
 
                     else:
                         print("Unknown event id %02x" % event_id)
@@ -894,6 +998,8 @@ def create_dtx_from_json(params):
         display_bar = True
 
         output_data = {}
+        sound_keys = []
+        sound_info = {}
         for event in events:
             measure_idx, beat_idx = get_nearest_beat(mapping, event['timestamp_ms'])
 
@@ -993,6 +1099,19 @@ def create_dtx_from_json(params):
                     if bonus_note_lane < 0x4c:
                         print("Couldn't find enough bonus note lanes")
 
+                sound_key = "%04d_%03d" % (
+                    event['data']['sound_id'],
+                    event['data']['volume'],
+                )
+
+                if sound_key not in sound_keys:
+                    sound_keys.append(sound_key)
+                    sound_id = sound_keys.index(sound_key)
+                    sound_info[sound_id] = {
+                        'sound_id': event['data']['sound_id'],
+                        'volume': event['data']['volume'],
+                    }
+
 
 
 
@@ -1053,6 +1172,7 @@ def create_dtx_from_json(params):
             'data': simplify_measures(output_data),
             'sound_ids': used_sound_ids,
             'bpms': bpm_list,
+            'sound_info': sound_info,
         }
 
 
@@ -1085,10 +1205,10 @@ def create_dtx_from_json(params):
 
         with open(output_filename, "w") as outfile:
             outfile.write("""#TITLE: (no title)
-            #ARTIST: (no artist)
-            #DLEVEL: 0
-            #GLEVEL: 0
-            #BLEVEL: 0\n""")
+#ARTIST: (no artist)
+#DLEVEL: 0
+#GLEVEL: 0
+#BLEVEL: 0\n""")
 
 
             comment_json = {
@@ -1096,18 +1216,41 @@ def create_dtx_from_json(params):
             }
 
             for k in output_data['sound_ids']:
-                comment_json['sound_lengths'][k] = output_data['sound_ids'][k]['duration']
+                if output_data['sound_ids'][k]['duration']:
+                    comment_json['sound_lengths'][k] = output_data['sound_ids'][k]['duration']
 
-            outfile.write("#COMMENT %s\n" % json.dumps(comment_json))
+            if comment_json['sound_lengths']:
+                outfile.write("#COMMENT %s\n" % json.dumps(comment_json))
 
             sound_initial = ""
-            for k in output_data['sound_ids']:
-                outfile.write("#WAV%s: %s\n" % (convert_base36(k, 2), os.path.join(sound_initial, "%s.wav" % output_data['sound_ids'][k]['filename'])))
+
+            sound_metadata = params.get('sound_metadata', None)
+            for k in sorted(output_data['sound_info'].keys()):
+                wav_filename = "%04x.wav" % output_data['sound_info'][k]['sound_id']
+
+                if sound_metadata and 'entries' in sound_metadata:
+                    for sound_entry in sound_metadata['entries']:
+                        if sound_entry['sound_id'] != output_data['sound_info'][k]['sound_id']:
+                            continue
+
+                        if "NoFilename" not in sound_entry['flags']:
+                            wav_filename = "%s.wav" % sound_entry['filename']
+
+                        break
+
+                outfile.write("#WAV%s %s\n" % (base_repr(int(k), 36, padding=2).upper()[-2:], wav_filename))
+
+
+            for k in sorted(output_data['sound_info'].keys()):
+                outfile.write("#VOLUME%s %d\n" % (base_repr(int(k), 36, padding=2).upper()[-2:], round((output_data['sound_info'][k]['volume'] / 127) * 100)))
+
+            # for k in sorted(output_data['sound_info'].keys()):
+            #     output.append("#PAN%s %d" % (base_repr(int(k), 36, padding=2).upper()[-2:], output_data['sound_info'][k]['pan']))
+
 
             outfile.write("""#WAVZZ: %s
-            #00001: ZZ
-            #000C2: 02
-            \n""" % (os.path.join(sound_initial, bgm_filename)))
+#00001: ZZ
+#000C2: 02\n""" % (os.path.join(sound_initial, bgm_filename)))
 
             outfile.write("#BPM %f\n" % output_data['bpms'][0])
             for i, bpm in enumerate(output_data['bpms']):
