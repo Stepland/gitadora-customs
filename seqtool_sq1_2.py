@@ -13,7 +13,7 @@ def main():
     input_group.add_argument('--sound-folder', help='Input folder containing sounds', default="")
 
     input_split_group = parser.add_argument_group('input_split')
-    for part in ['drum', 'guitar', 'bass', 'guitar1', 'guitar2']:
+    for part in ['drum', 'guitar', 'bass', 'open']:
         input_split_group.add_argument('--input-%s-bsc' % part, help="Basic %s chart input" % part)
         input_split_group.add_argument('--input-%s-adv' % part, help="Advanced %s chart input" % part)
         input_split_group.add_argument('--input-%s-ext' % part, help="Extreme %s chart input" % part)
@@ -32,7 +32,7 @@ def main():
 
     # Clean parts and difficulty
     if 'all' in args.parts:
-        args.parts = ['drum', 'guitar', 'bass',  'guitar1', 'guitar2']
+        args.parts = ['drum', 'guitar', 'bass', 'open']
 
     if 'all' in args.difficulty:
         args.difficulty = ['bsc', 'adv', 'ext']
@@ -45,11 +45,10 @@ def main():
         charts = glob.glob(args.input_folder)
 
         difficulty = ['bsc', 'adv', 'ext']
-        drum_parts = ['drum']
-        guitar_parts = ['guitar', None, 'bass', 'guitar1', 'guitar2']
-        parts = {
-            'D': drum_parts,
-            'G': guitar_parts
+        parts_mapping = {
+            'sp': "guitar",
+            'sb': "bass",
+            'op': "open",
         }
 
         for filename in charts:
@@ -57,13 +56,22 @@ def main():
 
             game_part = base_filename[0].upper()
             music_id = int(base_filename[1:5])
-            diff_idx = int(base_filename[4])
-            part_idx = int(base_filename[5]) if game_part == 'G' else 0
+            diff = base_filename[5:8]
+            part = None
 
-            if game_part not in parts or part_idx > len(parts[game_part]) or not parts[game_part][part_idx]:
+            if game_part == 'G':
+                part_key = base_filename[9:14]
+
+                if part_key in parts_mapping:
+                    part = parts_mapping[part_key]
+
+            else:
+                part = "drum"
+
+            if not part or diff not in difficulty:
                 continue
 
-            attr_name = "input_%s_%s" % (parts[game_part][part_idx], difficulty[diff_idx])
+            attr_name = "input_%s_%s" % (part, diff)
             setattr(args, attr_name, filename)
             args.music_id = music_id
 
@@ -92,16 +100,11 @@ def main():
                 "adv": args.input_bass_adv,
                 "ext": args.input_bass_ext,
             },
-            "guitar1": {
-                "bsc": args.input_guitar1_bsc,
-                "adv": args.input_guitar1_adv,
-                "ext": args.input_guitar1_ext,
+            "open": {
+                "bsc": args.input_open_bsc,
+                "adv": args.input_open_adv,
+                "ext": args.input_open_ext,
             },
-            "guitar2": {
-                "bsc": args.input_guitar2_bsc,
-                "adv": args.input_guitar2_adv,
-                "ext": args.input_guitar2_ext,
-            }
         },
         "no_sounds": args.no_sounds,
     }

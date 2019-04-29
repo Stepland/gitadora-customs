@@ -970,7 +970,7 @@ def create_dtx_from_json(params):
         display_bar = True
 
         output_data = {}
-        sound_keys = []
+        sound_keys = [None]
         sound_info = {}
         for event in events:
             measure_idx, beat_idx = get_nearest_beat(mapping, event['timestamp_ms'])
@@ -1210,13 +1210,8 @@ def create_dtx_from_json(params):
 
                         break
 
-                outfile.write("#WAV%s %s\n" % (base_repr(int(k), 36, padding=2).upper()[-2:], wav_filename))
-
-
-            for k in sorted(output_data['sound_info'].keys()):
-                outfile.write("#VOLUME%s %d\n" % (base_repr(int(k), 36, padding=2).upper()[-2:], round((output_data['sound_info'][k]['volume'] / 127) * 100)))
-
-            # for k in sorted(output_data['sound_info'].keys()):
+                outfile.write("#WAV%s: %s\n" % (base_repr(k, 36, padding=2).upper()[-2:], wav_filename))
+                outfile.write("#VOLUME%s: %d\n" % (base_repr(k, 36, padding=2).upper()[-2:], round((output_data['sound_info'][k]['volume'] / 127) * 100)))
             #     output.append("#PAN%s %d" % (base_repr(int(k), 36, padding=2).upper()[-2:], output_data['sound_info'][k]['pan']))
 
 

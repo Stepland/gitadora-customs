@@ -29,8 +29,10 @@ def read_dsq2_data(data, events, other_params):
             "data": packet_data
         }
 
+    if data[0x00:0x04].decode('ascii') == "DSQ1":
+        data = data[0x10:]
 
-    part = [None, "guitar", "bass", "open", "guitar", "guitar"][other_params['game_type']]
+    part = ["drum", None, None, None, None, None][other_params['game_type']]
 
     if not part:
         return None
@@ -82,6 +84,13 @@ class Dsq2Format:
 
     @staticmethod
     def is_format(filename):
+        header = open(filename, "rb").read(0x04)
+
+        try:
+            return header[0x00:0x04].decode('ascii') == "DSQ1"
+        except:
+            return False
+
         return False
 
 
