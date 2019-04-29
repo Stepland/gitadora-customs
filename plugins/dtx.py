@@ -416,7 +416,7 @@ def create_json_from_dtx(params):
                     if val == 0:
                         continue
 
-                    if event_id in reverse_dtx_mapping:
+                    if event_id in reverse_dtx_mapping or event_id in auto_play_ranges:
                         hold_timestamps = None
                         wail_misc = None
 
@@ -441,27 +441,30 @@ def create_json_from_dtx(params):
                         if wail_misc:
                             guitar_special |= 1
 
+                        note_str = "auto" if event_id in auto_play_ranges else reverse_dtx_mapping[event_id]
+
                         target_chart.append({
                             'name': "note",
                             'timestamp': timestamp['timestamp'],
                             'timestamp_ms': timestamp['timestamp_ms'],
                             'data': {
                                 'sound_id': val,
-                                'note': reverse_dtx_mapping[event_id],
+                                'note': note_str,
                                 'note_length': get_sound_length(comment_json, val),
                                 'hold_duration': timestamp_by_beat[hold_timestamps[1][0]][hold_timestamps[1][1]]['timestamp'] - timestamp_by_beat[hold_timestamps[0][0]][hold_timestamps[0][1]]['timestamp'] if hold_timestamps else 0,
                                 'volume': volume_list[val] if val in volume_list else 127,
                                 'wail_misc': wail_misc if wail_misc else 0,
                                 'guitar_special': guitar_special,
-                                'bonus_note': is_bonus_note(bonus_notes, measure_id, beat_id, reverse_dtx_mapping[event_id]),
-                                'auto_note': 0,
-                                'auto_volume': 0,
+                                'bonus_note': is_bonus_note(bonus_notes, measure_id, beat_id, note_str),
+                                'auto_note': 1 if event_id in auto_play_ranges else 0,
+                                'auto_volume': 1 if event_id in auto_play_ranges else 0,
                                 'unk': 0,
                             }
                         })
 
                     elif event_id == 0x01:
                         # BGM
+                        # Does this even really need to be handled?
                         pass
 
                     elif event_id == 0xc2:
@@ -502,38 +505,7 @@ def create_json_from_dtx(params):
                             'data': {}
                         })
 
-                    elif event_id in [0x4c, 0x4d, 0x4e, 0x4f]:
-                        # Bonus notes
-                        # TODO: Add support for bonus notes and event data
-                        pass
-
-                    elif event_id in auto_play_ranges:
-                        # Auto note
-                        base_chart.append({
-                            'name': "note",
-                            'timestamp': timestamp['timestamp'],
-                            'timestamp_ms': timestamp['timestamp_ms'],
-                            'data': {
-                                # TODO: Add support for all of these
-                                'sound_id': val,
-                                'note': "auto",
-                                'note_length': get_sound_length(comment_json, val),
-                                'hold_duration': 0,
-                                'volume': 0,
-                                'auto_volume': 1,
-                                'wail_misc': 0,
-                                'guitar_special': 0,
-                                'auto_note': 1,
-                                'bonus_note': 0,
-                                'unk': 0,
-                            }
-                        })
-
-                    elif event_id in [0x28]:
-                        # Temporary ignore
-                        print("WARNING: Implement %02x" % event_id)
-
-                    elif event_id in [0x2c, 0x2d]:
+                    elif event_id in [0x28, 0xa8, 0x2c, 0x2d, 0x4c, 0x4d, 0x4e, 0x4f]:
                         # Ignore these, they aren't errors and are intentionally not handled here
                         pass
 
