@@ -295,6 +295,13 @@ def add_song_to_mdb(mdb, package, fresh=False, unsafe=False):
         },
     }
 
+    if 'extra' in package:
+        for k in package['extra']:
+            new_record[k] = {
+                'type': package['extra'][k]['type'],
+                'value': package['extra'][k]['value']
+            }
+
     new_record['__hash'] = {
         'type': "str",
         'value': package['unique_id'],
