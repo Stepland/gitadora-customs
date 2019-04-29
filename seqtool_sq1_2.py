@@ -10,7 +10,7 @@ def main():
     input_group = parser.add_argument_group('input')
     input_group.add_argument('--input-folder', help='Input folder with wildcard path (batch import)', default="")
     input_group.add_argument('--input-format', help='Input file format')
-    input_group.add_argument('--sound-folder', help='Input folder containing sounds', default="")
+    input_group.add_argument('--sound-folder', help='Input folder containing sounds', required=True)
 
     input_split_group = parser.add_argument_group('input_split')
     for part in ['drum', 'guitar', 'bass', 'open']:
@@ -23,8 +23,6 @@ def main():
 
     parser.add_argument('--parts', nargs='*', choices=['drum', 'guitar', 'bass', 'open', 'all'], default="all")
     parser.add_argument('--difficulty', nargs='*', choices=['nov', 'bsc', 'adv', 'ext', 'mst', 'all', 'max', 'min'], default="all")
-
-    parser.add_argument('--no-sounds', action='store_true', help="Don't convert sound files", default=False)
 
     parser.add_argument('--music-id', type=int, help="Force a music ID", default=None)
 
@@ -106,7 +104,7 @@ def main():
                 "ext": args.input_open_ext,
             },
         },
-        "no_sounds": args.no_sounds,
+        "no_sounds": False,
     }
 
     seqtool_main.add_task(params)

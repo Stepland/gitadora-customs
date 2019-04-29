@@ -137,7 +137,7 @@ def main():
     input_group = parser.add_argument_group('input')
     input_group.add_argument('--input', help='Input file/folder')
     input_group.add_argument('--input-format', help='Input file format')
-    input_group.add_argument('--sound-folder', help='Input folder containing sounds', default="")
+    input_group.add_argument('--sound-folder', help='Input folder containing sounds', required=True)
     input_group.add_argument('--event-file', help='Input file containing event information (for SQ2/SQ3)')
 
     input_split_group = parser.add_argument_group('input_split')
@@ -158,8 +158,6 @@ def main():
 
     parser.add_argument('--parts', nargs='*', choices=['drum', 'guitar', 'bass', 'open', 'all'], default="all")
     parser.add_argument('--difficulty', nargs='*', choices=['nov', 'bsc', 'adv', 'ext', 'mst', 'all', 'max', 'min'], default="all")
-
-    parser.add_argument('--no-sounds', action='store_true', help="Don't convert sound files", default=False)
 
     parser.add_argument('--music-id', type=int, help="Force a music ID", default=None)
 

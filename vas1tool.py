@@ -50,16 +50,16 @@ def read_vas3(input_filename, output_folder, force_hex=False, mix_audio=False, i
         # sound_flag seems to be related to defaults. If something is set to default, it is 0x02. Else it's 0x04 (for GDXG). Always 0 for GDXH?
         # entry_unk4 seems to always be 255??
         metadata_offset, offset, filesize = struct.unpack("<III", data[entry_start+(i*0x0c):entry_start+(i*0x0c)+0x0c])
-        metadata_unk1_1, metadata_unk1_2, metadata_unk1_3, sound_id, instrument_id, metadata_unk2_2, metadata_unk2_3, metadata_unk2_4, metadata_unk3, sample_rate = struct.unpack("<BBBBBBBBHH", data[entry_start+metadata_offset+(entry_count*0x0c):entry_start+metadata_offset+(entry_count*0x0c)+0x0c])
+        metadata_unk1_1, volume, pan, sound_id, instrument_id, metadata_unk2_2, metadata_unk2_3, metadata_unk2_4, metadata_unk3, sample_rate = struct.unpack("<BBBBBBBBHH", data[entry_start+metadata_offset+(entry_count*0x0c):entry_start+metadata_offset+(entry_count*0x0c)+0x0c])
         sample_rate *= 2
 
         #output_filename = os.path.join(basepath, "{}.wav".format(entry['filename']))
 
-        print("%04x | %08x %08x %08x | %02x %02x %02x %02x  %02x %02x %02x %02x  %04x  %04x | %08x" % (i, metadata_offset, offset, filesize, metadata_unk1_1, metadata_unk1_2, metadata_unk1_3, sound_id, instrument_id, metadata_unk2_2, metadata_unk2_3, metadata_unk2_4, sample_rate, metadata_unk3, entry_start+metadata_offset+(entry_count*0x0c)))
+        print("%04x | %08x %08x %08x | %02x %02x %02x %02x  %02x %02x %02x %02x  %04x  %04x | %08x" % (i, metadata_offset, offset, filesize, metadata_unk1_1, volume, pan, sound_id, instrument_id, metadata_unk2_2, metadata_unk2_3, metadata_unk2_4, sample_rate, metadata_unk3, entry_start+metadata_offset+(entry_count*0x0c)))
 
         offset += ((entry_count * 0x0c) * 2) + 4
 
-        entries.append((offset, filesize, i))
+        entries.append((offset, filesize, i, volume, pan - 100))
 
     entries.append(len(data))
 
@@ -91,7 +91,7 @@ def read_vas3(input_filename, output_folder, force_hex=False, mix_audio=False, i
     }
 
     for idx, entry_info in enumerate(entries[:-1]):
-        entry, filesize, sound_id = entry_info
+        entry, filesize, sound_id, volume, pan = entry_info
         #filesize = entries[idx + 1] - entry
 
         output_filename = os.path.join(basepath, "%04x.pcm" % (idx))
@@ -106,16 +106,18 @@ def read_vas3(input_filename, output_folder, force_hex=False, mix_audio=False, i
         audio.get_wav_from_pcm(output_filename)
         os.remove(output_filename)
 
-        volume = 127
-        pan = 64
+        entry_filename = "%s.%04d" % (os.path.basename(os.path.splitext(input_filename)[0]).lower(), sound_id)
+
+        duration = len(pydub.AudioSegment.from_file(os.path.splitext(output_filename)[0] + ".wav")) / 1000
 
         metadata['entries'].append({
             'sound_id': sound_id,
-            'filename': "",
+            'filename': entry_filename,
             'volume': volume,
             'pan': pan,
             'extra': 255, # Unknown
             'flags': ['NoFilename'],
+            'duration': duration,
         })
 
     open(os.path.join(basepath, "metadata.json"), "w").write(json.dumps(metadata, indent=4))

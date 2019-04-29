@@ -272,49 +272,7 @@ def read_vas3(input_filename, output_folder, force_hex=False, mix_audio=False):
         if entry_unk1 != 0:
             filesize = entry_unk1
 
-        # if entry_unk1 != 0 or entry_unk2 != 0:
-        #     print("Unknown fields in entry: %08x %08x" % (entry_unk1, entry_unk2))
-        #     exit(1)
-
-        # Code for an older version of VA3 files?
-        # I think there's some padding that it's trying to deal with here, but I'm not sure exactly.
-        # Need a sample to verify this functionality.
-        # entry_unk1 and entry_unk2 should always be 0 for v3
-        # if entry_unk2 != 0 and (entry_unk2 == filesize or entry_unk2 == filesize + 0x20 or entry_unk2 == filesize * 4):
-        #     entry_unk2 = 0
-
-        # if version_flag4 == 0:
-        #     if entry_unk2 > 0 and entry_unk2 >= 0x20:
-        #         entry_unk2 -= 0x20
-        #     if entry_unk1 > 0 and entry_unk1 >= 0x20:
-        #         entry_unk1 -= 0x20
-
-        # if entry_unk2 > filesize:
-        #     entry_unk2 = filesize
-
-        # if entry_unk1 != 0:
-        #     valid_file = entry_unk1 == entry_unk2
-        # else:
-        #     valid_file = entry_unk2 == 0
-
-        if gdx_volume_flag == 0:
-             # ??
-             # This code shouldn't be hit unless you're working
-             # with some really old files I suspect
-            volume = 3 * volume / 2
-            print("Verify volume when gdx_volume_flag == 0")
-            exit(1)
-        else:
-            volume = min(volume, 127)
-
-        if version_flag1 == 1 and version_flag2 == 0 and version_flag3 == 0 and (version_flag4 == 0 or version_flag4 == 1):
-            # v1 and v2 use a table for volume?
-            # Need to find a sample to verify
-            #volume2 = VOLUME_TABLE[min(volume, 0x7f)]
-            #print(volume, volume2)
-            #print("Verify when volume table is used (percentages or not?)")
-            #exit(1)
-            pass
+        volume = min(volume, 127)
 
         if sound_id >= 0xfff0:
             print("Verify when sound_id >= 0xfff0")
@@ -352,10 +310,6 @@ def read_vas3(input_filename, output_folder, force_hex=False, mix_audio=False):
             if (sound_flag & 0x02) != 0:
                 metadata['entries'][-1]['flags'].append(0x02)
 
-        # if (sound_flag & 0x04) != 0:
-        #     metadata['entries'][-1]['flags'].append("DefaultSound") # Generate this by checking defaults in header
-                #"DefaultSound" if (sound_flag & 0x04) != 0,
-
         if (sound_flag & 0x0100) != 0:
             metadata['entries'][-1]['flags'].append("NoFilename")
 
@@ -368,8 +322,8 @@ def read_vas3(input_filename, output_folder, force_hex=False, mix_audio=False):
         os.makedirs(basepath)
 
     for entry in entries:
-        #print("Extracting", entry['filename'])
-        #print(entry)
+        # print("Extracting", entry['filename'])
+        print(entry)
 
         wave_data = bytearray(data[data_start+entry['offset']:data_start+entry['offset']+entry['filesize']])
         output = adpcmwave.decode_data(wave_data, entry['rate'], entry['channels'], entry['bits'])

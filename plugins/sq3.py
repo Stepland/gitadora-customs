@@ -3,6 +3,11 @@ import json
 import os
 import struct
 
+import eamxml
+
+from lxml import etree
+from lxml.builder import E
+
 from plugins.sq import generate_json_from_data
 
 VALID_METACOMMANDS = ['startpos', 'endpos', 'baron', 'baroff', 'measure', 'beat', 'unk0c', 'bpm', 'barinfo']
@@ -205,6 +210,73 @@ REVERSE_NOTE_MAPPING = {
     "b_rgbyp": 0x1f,
 }
 
+
+def create_event_file(params, charts):
+    output_folder = params['output']
+
+    # Gather bonus note info
+    # Use a dictionary for the first pass because it's
+    # easier to handle the data for multiple difficulties
+    bonus_notes = {}
+    for chart in charts:
+        for x in sorted(chart['beat_data'], key=lambda x: int(x['timestamp'])):
+            if not (x['name'] == "note" and x['data'].get('bonus_note', 0) == 1):
+                continue
+
+            if x['timestamp'] not in bonus_notes:
+                bonus_notes[x['timestamp']] = {}
+
+            gamelevel = 1 << chart['header']['difficulty']
+            if x['data']['sound_id'] in bonus_notes[x['timestamp']]:
+                gamelevel |= bonus_notes[x['timestamp']][x['data']['sound_id']]['gamelevel']
+
+            bonus_notes[x['timestamp']][x['data']['sound_id']] = {
+                'sound_id': x['data']['sound_id'],
+                'time': x['timestamp'],
+                'gamelevel': gamelevel,
+            }
+
+    # Convert the dictionary into a flat list
+    bonus_notes_flat = []
+    for beat in sorted(bonus_notes.keys(), key=lambda x: int(x)):
+        for sound_id in bonus_notes[beat]:
+            bonus_notes_flat.append(bonus_notes[beat][sound_id])
+
+    # Create XML for bonus notes
+    event_xml = E.xg_eventdata(
+        E.version("2", __type="u32"),
+        E.music(
+            E.musicid("{}".format(params['musicid']), __type="u32"),
+            E.game(
+                E.gametype("2", __type="u32"),  # Bass?
+                E.events(
+                    E.eventtype("1", __type="u32"),  # ?
+                )
+            ),
+            E.game(
+                E.gametype("0", __type="u32"),  # Drum
+                E.events(
+                    E.eventtype("0", __type="u32"),  # ?
+                    *[E.event(
+                        E.eventtype("0", __type="u32"),
+                        E.value("0", __type="u32"),  # ?
+                        E.time("{}".format(x['time']), __type="u32"),
+                        E.note("{}".format(x['sound_id']), __type="u32"),
+                        E.gamelevel("{}".format(x['gamelevel']), __type="u32"),
+                    ) for x in bonus_notes_flat]
+                ),
+            ),
+        ),
+    )
+
+    # Write binary XML event file
+    event_xml_text = etree.tostring(event_xml, pretty_print=True).decode('utf-8')
+    event_xml_filename = os.path.join(output_folder, "event%04d.ev2" % (params['musicid']))
+
+    with open(event_xml_filename, "wb") as f:
+        f.write(eamxml.get_binxml(event_xml_text))
+
+
 def generate_sq3_from_json(params):
     def build_command(event, game_type):
         output = bytearray(0x40)
@@ -213,6 +285,12 @@ def generate_sq3_from_json(params):
         output[0x04] = EVENT_ID_REVERSE[event['name']] & 0xff
 
         if event['name'] == "bpm":
+            if event['data']['bpm'] < 1:
+                event['data']['bpm'] = 1
+
+            elif event['data']['bpm'] > 60000000:
+                event['data']['bpm'] = 60000000
+
             output[0x34:0x38] = struct.pack("<I", int(round(60000000 / event['data']['bpm'])))
 
         elif event['name'] == "barinfo":
@@ -502,6 +580,9 @@ def generate_sq3_from_json(params):
             outfile.write(output_data)
 
 
+        create_event_file(params, filtered_charts)
+
+
 def read_sq3_data(data, events, other_params):
     def parse_event_block(output, game, events={}):
         packet_data = {}
@@ -627,7 +708,7 @@ def generate_json_from_sq3(params):
 
     data_offset, musicid, num_charts = struct.unpack("<III", data[0x10:0x1c])
 
-    if 'musicid' not in params:
+    if not params.get('musicid', None):
         params['musicid'] = musicid
 
     raw_charts = []

@@ -304,6 +304,12 @@ def create_json_from_dtx(params):
                 bpm_id = int(event_str[3:], 36)
                 bpm_list[bpm_id] = float(event_data)
 
+                if bpm_list[bpm_id] < 1:
+                    bpm_list[bpm_id] = 1
+
+                elif bpm_list[bpm_id] > 60000000:
+                    bpm_list[bpm_id] = 60000000
+
             elif event_str.startswith("WAV"):
                 wav_id = int(event_str[3:], 36)
                 wav_list[wav_id] = event_data
@@ -1221,7 +1227,7 @@ def create_dtx_from_json(params):
 
             outfile.write("#BPM %f\n" % output_data['bpms'][0])
             for i, bpm in enumerate(output_data['bpms']):
-                outfile.write("#BPM%02d %f\n" % (i + 1, output_data['bpms'][i]))
+                outfile.write("#BPM%s %f\n" % (base_repr(i + 1, 36, padding=2).upper()[-2:], output_data['bpms'][i]))
 
 
             for measure_idx in output_data['data']:
