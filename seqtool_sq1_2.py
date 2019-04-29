@@ -4,10 +4,12 @@ import glob
 import os
 
 import seqtool_main
+import fcntool
 
 def main():
     parser = argparse.ArgumentParser()
     input_group = parser.add_argument_group('input')
+    input_group.add_argument('--input-fcn', help='Input FCN file', default="")
     input_group.add_argument('--input-folder', help='Input folder with wildcard path (batch import)', default="")
     input_group.add_argument('--input-format', help='Input file format')
     input_group.add_argument('--sound-folder', help='Input folder containing sounds', required=True)
@@ -27,6 +29,9 @@ def main():
     parser.add_argument('--music-id', type=int, help="Force a music ID", default=None)
 
     args = parser.parse_args()
+
+    if args.input_fcn:
+        args.input_folder = fcntool.dump_fcn(args.input_fcn) + "\\*"
 
     # Clean parts and difficulty
     if 'all' in args.parts:
