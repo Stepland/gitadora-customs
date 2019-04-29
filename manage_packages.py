@@ -947,7 +947,7 @@ def add_packages_to_phrase_address_list(filename, packages, dupes):
     save_phrase_address_list(filename, pal)
 
 
-def install_packages(game_directory="", packages_directory="packages", game_data_folder="data", fresh=False, unsafe=False):
+def install_packages(game_directory="", packages_directory="packages", game_data_folder="data", fresh=False, unsafe=False, new_only=False):
     packages = get_package_info(packages_directory)
 
     game_data_folder = os.path.join(game_directory, game_data_folder)
@@ -963,8 +963,18 @@ def install_packages(game_directory="", packages_directory="packages", game_data
 
     packages_split = {}
     for package in packages:
+        data_folder = ("d%04d" % package['music_id'])[:4]
+        ifs_data_folder = "data\\ifs_pack"
+        output_folder = os.path.join(ifs_data_folder, data_folder)
+        seq_ifs_outputfile = os.path.join(output_folder, "m%04d_seq.ifs" % package['music_id'])
+        bgm_ifs_outputfile = os.path.join(output_folder, "m%04d_bgm.ifs" % package['music_id'])
+
+        if new_only and os.path.exists(seq_ifs_outputfile) and os.path.exists(bgm_ifs_outputfile):
+            print("Already exists, skipping package", package['__directory'])
+            continue
+
         prepare_graphics_for_package(package)
-        create_song_data_ifs_for_package(package)
+        create_song_data_ifs_for_package(package, ifs_data_folder)
 
         # Copy movie file
         if 'files' in package and 'movie' in package['files']:
@@ -1104,6 +1114,7 @@ if __name__ == "__main__":
     parser.add_argument('-p', '--packages-dir', help='Input packages directory', default="packages")
     parser.add_argument('-u', '--unsafe', help='Enable unsafe mode', default=False, action='store_true')
     parser.add_argument('-s', '--sort', help='Sort music database only', default=False, action='store_true')
+    parser.add_argument('-n', '--update-new', help='Process new folders only', default=False, action='store_true')
     args = parser.parse_args()
 
     if args.sort:
@@ -1113,4 +1124,4 @@ if __name__ == "__main__":
 
     else:
         patch_game_for_customs(args.game_dir)
-        install_packages(args.game_dir, args.packages_dir, unsafe=args.unsafe)
+        install_packages(args.game_dir, args.packages_dir, unsafe=args.unsafe, new_only=args.update_new)
