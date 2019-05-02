@@ -55,11 +55,11 @@ def read_vas3(input_filename, output_folder, force_hex=False, mix_audio=False, i
 
         #output_filename = os.path.join(basepath, "{}.wav".format(entry['filename']))
 
-        print("%04x | %08x %08x %08x | %02x %02x %02x %02x  %02x %02x %02x %02x  %04x  %04x | %08x" % (i, metadata_offset, offset, filesize, metadata_unk1_1, volume, pan, sound_id, instrument_id, metadata_unk2_2, metadata_unk2_3, metadata_unk2_4, sample_rate, metadata_unk3, entry_start+metadata_offset+(entry_count*0x0c)))
+        #print("%04x | %08x %08x %08x | %02x %02x %02x %02x  %02x %02x %02x %02x  %04x  %04x | %08x" % (i, metadata_offset, offset, filesize, metadata_unk1_1, volume, pan, sound_id, instrument_id, metadata_unk2_2, metadata_unk2_3, metadata_unk2_4, sample_rate, metadata_unk3, entry_start+metadata_offset+(entry_count*0x0c)))
 
         offset += ((entry_count * 0x0c) * 2) + 4
 
-        entries.append((offset, filesize, i, volume, pan - 100))
+        entries.append((offset, filesize, i, volume, pan + 64 if is_guitar else pan - 100))
 
     entries.append(len(data))
 
@@ -96,7 +96,7 @@ def read_vas3(input_filename, output_folder, force_hex=False, mix_audio=False, i
 
         output_filename = os.path.join(basepath, "%04x.pcm" % (idx))
 
-        print("Extracting", output_filename)
+        print("Extracting %s | %d %d %d" % (output_filename, sound_id, volume, pan))
         with open(output_filename, "wb") as outfile:
             outfile.write(struct.pack(">IHHB", filesize, 0, sample_rate if is_guitar else 44100, 1))
             outfile.write(bytearray([0] * 7))
