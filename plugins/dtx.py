@@ -201,6 +201,9 @@ def create_json_from_dtx(params):
 
     def get_sound_id(filename):
         # TODO: Do this properly
+        if filename[:2] in ["g_", "d_"]:
+            filename = filename[2:]
+
         return int(os.path.splitext(os.path.basename(filename))[0], 16)
 
 
@@ -291,6 +294,9 @@ def create_json_from_dtx(params):
                 pass
 
             elif event_str == "BLEVEL":
+                pass
+
+            elif event_str == "PREVIEW":
                 pass
 
             elif event_str == "COMMENT":

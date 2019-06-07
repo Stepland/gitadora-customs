@@ -55,6 +55,7 @@ def main():
         args.difficulty = ['max']
 
     params_drum = {
+        "input": args.input,
         "input_format": args.input_format if args.input_format else None,
         "output": args.output,
         "output_format": args.output_format,
@@ -73,6 +74,7 @@ def main():
     }
 
     params_guitar = {
+        "input": args.input,
         "input_format": args.input_format if args.input_format else None,
         "output": args.output,
         "output_format": args.output_format,
