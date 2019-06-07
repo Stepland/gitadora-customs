@@ -23,7 +23,7 @@ FLAG_MAP = {
     "NoFilename": 0x0100
 }
 
-def read_vas3(input_filename, output_folder, force_hex=False, mix_audio=False, is_guitar=False):
+def read_vas1(input_filename, input_fre_filename, output_folder, force_hex=False, mix_audio=False, is_guitar=False):
     data = open(input_filename, "rb").read()
 
     entry_count = struct.unpack("<I", data[0x00:0x04])[0]
@@ -33,17 +33,51 @@ def read_vas3(input_filename, output_folder, force_hex=False, mix_audio=False, i
         print("No files to extract")
         exit(1)
 
-
-
-    default_hihat = 0x64
-    default_snare = 0x26
-    default_bass = 0x24
-    default_hightom = 0x30
-    default_lowtom = 0x29
-    default_rightcymbal = 0x31
     default_leftcymbal = 0xfff0
     default_floortom = 0xfff1
     default_leftpedal = 0xfff2
+
+    if input_fre_filename:
+        fre_data = open(input_fre_filename, "rb").read()
+
+        if len(fre_data) == 12:
+            default_hihat = int.from_bytes(fre_data[0:2], byteorder="little")
+            default_snare = int.from_bytes(fre_data[2:4], byteorder="little")
+            default_bass = int.from_bytes(fre_data[4:6], byteorder="little")
+            default_hightom = int.from_bytes(fre_data[6:8], byteorder="little")
+            default_lowtom = int.from_bytes(fre_data[8:10], byteorder="little")
+            default_rightcymbal = int.from_bytes(fre_data[10:12], byteorder="little")
+
+        else:
+            search_filename = os.path.splitext(os.path.basename(input_filename))[0].lower()
+            found_fre = False
+
+            for i in range(len(fre_data) // 0x18):
+                filename = fre_data[i*0x18:i*0x18+12].decode('ascii').strip('\0')
+
+                if filename == search_filename:
+                    cur_fre_data = fre_data[i*0x18+12:(i+1)*0x18]
+                    default_hihat = int.from_bytes(cur_fre_data[0:2], byteorder="little")
+                    default_snare = int.from_bytes(cur_fre_data[2:4], byteorder="little")
+                    default_bass = int.from_bytes(cur_fre_data[4:6], byteorder="little")
+                    default_hightom = int.from_bytes(cur_fre_data[6:8], byteorder="little")
+                    default_lowtom = int.from_bytes(cur_fre_data[8:10], byteorder="little")
+                    default_rightcymbal = int.from_bytes(cur_fre_data[10:12], byteorder="little")
+                    found_fre = True
+
+                    break
+
+            if not found_fre:
+                print("Couldn't find default keysound entries for", input_filename)
+                exit(1)
+
+    else:
+        default_hihat = 0
+        default_snare = 0
+        default_bass = 0
+        default_hightom = 0
+        default_lowtom = 0
+        default_rightcymbal = 0
 
     entries = []
     for i in range(entry_count):
@@ -126,10 +160,15 @@ def read_vas3(input_filename, output_folder, force_hex=False, mix_audio=False, i
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('-i', '--input', help='Input file', required=True)
+    parser.add_argument('-r', '--input-fre', help='Input FRE file', default=None)
     parser.add_argument('-o', '--output', help='Output file', required=True)
     parser.add_argument('-m', '--mix', action='store_true', help='Mix output files using volume and pan parameters', required=False, default=False)
     parser.add_argument('-g', '--guitar', action='store_true', help='Is extracting guitar archive', required=False, default=False)
     parser.add_argument('-f', '--force-hex', action='store_true', help='Force hex filenames', required=False, default=False)
     args = parser.parse_args()
 
-    read_vas3(args.input, args.output, args.force_hex, args.mix, args.guitar)
+    if not args.guitar and not args.input_fre:
+        print("Must specify an input FRE file with drum data")
+        exit(1)
+
+    read_vas1(args.input, args.input_fre, args.output, args.force_hex, args.mix, args.guitar)
